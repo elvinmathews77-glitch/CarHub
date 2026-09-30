@@ -2,14 +2,17 @@
 
 session_start();
 
-include "config/db.php";
+require_once "config/db.php";
 
 
 /* =========================================================
-   LOGIN CHECK
-   ========================================================= */
+   1. LOGIN CHECK
+========================================================= */
 
-if (!isset($_SESSION["user_id"]) || empty($_SESSION["user_id"])) {
+if (
+    !isset($_SESSION["user_id"]) ||
+    empty($_SESSION["user_id"])
+) {
 
     header("Location: login.php");
     exit();
@@ -20,15 +23,15 @@ $user_id = (int)$_SESSION["user_id"];
 
 
 /* =========================================================
-   GET LOGGED-IN USER
-   ========================================================= */
+   2. GET LOGGED-IN USER
+========================================================= */
 
-$user_stmt = $conn->prepare(
-    "SELECT id, name, email
-     FROM users
-     WHERE id = ?
-     LIMIT 1"
-);
+$user_stmt = $conn->prepare("
+    SELECT id, name, email
+    FROM users
+    WHERE id = ?
+    LIMIT 1
+");
 
 if (!$user_stmt) {
     die("Unable to load user.");
@@ -36,7 +39,9 @@ if (!$user_stmt) {
 
 $user_stmt->bind_param("i", $user_id);
 
-$user_stmt->execute();
+if (!$user_stmt->execute()) {
+    die("Unable to load user: " . $user_stmt->error);
+}
 
 $user_result = $user_stmt->get_result();
 
@@ -60,8 +65,8 @@ $user_stmt->close();
 
 
 /* =========================================================
-   GET BOOKING ID
-   ========================================================= */
+   3. GET BOOKING ID
+========================================================= */
 
 if (
     !isset($_GET["booking_id"]) ||
@@ -84,11 +89,12 @@ if ($booking_id <= 0) {
 
 
 /* =========================================================
-   GET BOOKING
-   ========================================================= */
+   4. GET BOOKING + CAR + PAYMENT
+========================================================= */
 
-$stmt = $conn->prepare(
-    "SELECT
+$stmt = $conn->prepare("
+    SELECT
+
         b.id,
         b.car_id,
         b.name,
@@ -99,21 +105,39 @@ $stmt = $conn->prepare(
 
         c.brand,
         c.model,
-        c.price
+        c.price,
+        c.image,
 
-     FROM bookings b
+        /* PAYMENT INFORMATION */
 
-     LEFT JOIN cars c
+        p.id AS payment_id,
+        p.payment_method,
+        p.order_reference,
+        p.transaction_id,
+        p.amount AS payment_amount,
+        p.status AS payment_status,
+        p.created_at AS payment_created_at
+
+    FROM bookings b
+
+    LEFT JOIN cars c
         ON b.car_id = c.id
 
-     WHERE b.id = ?
-       AND LOWER(TRIM(b.email)) = LOWER(TRIM(?))
+    LEFT JOIN payments p
+        ON b.id = p.booking_id
 
-     LIMIT 1"
-);
+    WHERE b.id = ?
+      AND LOWER(TRIM(b.email)) =
+          LOWER(TRIM(?))
+
+    LIMIT 1
+");
 
 if (!$stmt) {
-    die("Unable to load booking.");
+    die(
+        "Unable to load booking: "
+        . $conn->error
+    );
 }
 
 $stmt->bind_param(
@@ -122,14 +146,19 @@ $stmt->bind_param(
     $user_email
 );
 
-$stmt->execute();
+if (!$stmt->execute()) {
+    die(
+        "Unable to load booking: "
+        . $stmt->error
+    );
+}
 
 $result = $stmt->get_result();
 
 
 /* =========================================================
-   BOOKING NOT FOUND
-   ========================================================= */
+   5. BOOKING NOT FOUND
+========================================================= */
 
 if ($result->num_rows !== 1) {
 
@@ -141,45 +170,131 @@ if ($result->num_rows !== 1) {
 
 }
 
-
 $booking = $result->fetch_assoc();
 
 $stmt->close();
 
 
 /* =========================================================
-   BOOKING DATA
-   ========================================================= */
+   6. BOOKING DATA
+========================================================= */
 
-$brand = $booking["brand"] ?? "Car";
+$brand =
+    $booking["brand"] ?? "Car";
 
-$model = $booking["model"] ?? "Vehicle";
+$model =
+    $booking["model"] ?? "Vehicle";
 
-$price = (float)($booking["price"] ?? 0);
+$price =
+    (float)(
+        $booking["price"] ?? 0
+    );
 
-$status = trim(
-    $booking["status"] ?? "Pending"
-);
+$status =
+    trim(
+        $booking["status"] ?? "Pending"
+    );
 
-$car_id = (int)($booking["car_id"] ?? 0);
-
-
-/* =========================================================
-   STATUS CLASS
-   ========================================================= */
-
-$status_class = strtolower($status);
-
-$status_class = preg_replace(
-    "/[^a-z0-9]+/",
-    "-",
-    $status_class
-);
+$car_id =
+    (int)(
+        $booking["car_id"] ?? 0
+    );
 
 
 /* =========================================================
-   CHECK IF BOOKING CAN BE CANCELLED
-   ========================================================= */
+   7. PAYMENT DATA
+========================================================= */
+
+$payment_id =
+    !empty($booking["payment_id"])
+    ? (int)$booking["payment_id"]
+    : 0;
+
+$payment_method =
+    trim(
+        $booking["payment_method"] ?? ""
+    );
+
+$order_reference =
+    trim(
+        $booking["order_reference"] ?? ""
+    );
+
+$transaction_id =
+    trim(
+        $booking["transaction_id"] ?? ""
+    );
+
+$payment_amount =
+    isset($booking["payment_amount"])
+    ? (float)$booking["payment_amount"]
+    : 0;
+
+$payment_status =
+    trim(
+        $booking["payment_status"] ?? ""
+    );
+
+
+/* =========================================================
+   8. STATUS CLASS
+========================================================= */
+
+$status_class =
+    strtolower($status);
+
+$status_class =
+    preg_replace(
+        "/[^a-z0-9]+/",
+        "-",
+        $status_class
+    );
+
+
+/* =========================================================
+   9. PAYMENT STATUS CLASS
+========================================================= */
+
+if ($payment_status === "") {
+
+    $payment_status_class =
+        "payment-none";
+
+} elseif (
+    strtolower($payment_status)
+    === "test successful"
+) {
+
+    $payment_status_class =
+        "payment-success";
+
+} elseif (
+    strtolower($payment_status)
+    === "pending"
+) {
+
+    $payment_status_class =
+        "payment-pending";
+
+} elseif (
+    strtolower($payment_status)
+    === "failed"
+) {
+
+    $payment_status_class =
+        "payment-failed";
+
+} else {
+
+    $payment_status_class =
+        "payment-pending";
+
+}
+
+
+/* =========================================================
+   10. CHECK IF BOOKING CAN BE CANCELLED
+========================================================= */
 
 $can_cancel = !in_array(
     $status_class,
@@ -193,45 +308,116 @@ $can_cancel = !in_array(
 
 
 /* =========================================================
-   CAR IMAGE
-   IMPORTANT:
-   SAME IMAGE LOGIC AS YOUR BOOKING PAGE
-   ========================================================= */
+   11. CAR IMAGE
+========================================================= */
 
-$brand_lower = strtolower(trim($brand));
+$db_image =
+    trim(
+        $booking["image"] ?? ""
+    );
+
+$car_image = "";
+
+$brand_lower =
+    strtolower(
+        trim($brand)
+    );
 
 
-if (
-    strpos($brand_lower, "mercedes") !== false
-) {
+/* Database image */
 
-    $car_image =
-        "https://images.unsplash.com/photo-1618843479313-40f8afb4b4d8?auto=format&fit=crop&w=1200&q=85";
+if ($db_image !== "") {
+
+    if (
+        filter_var(
+            $db_image,
+            FILTER_VALIDATE_URL
+        )
+    ) {
+
+        $car_image = $db_image;
+
+    } else {
+
+        $possible_paths = [
+
+            $db_image,
+
+            "uploads/" . $db_image,
+
+            "images/" . $db_image,
+
+            "assets/images/" . $db_image
+
+        ];
+
+
+        foreach (
+            $possible_paths as $path
+        ) {
+
+            if (
+                file_exists(
+                    __DIR__ . "/" . $path
+                ) &&
+                is_file(
+                    __DIR__ . "/" . $path
+                )
+            ) {
+
+                $car_image = $path;
+
+                break;
+
+            }
+
+        }
+
+    }
 
 }
 
-elseif (
-    strpos($brand_lower, "audi") !== false
-) {
 
-    $car_image =
-        "https://images.unsplash.com/photo-1606664515524-ed2f786a0bd6?auto=format&fit=crop&w=1200&q=85";
+/* Fallback images */
 
-}
+if ($car_image === "") {
 
-elseif (
-    strpos($brand_lower, "bmw") !== false
-) {
+    if (
+        strpos(
+            $brand_lower,
+            "mercedes"
+        ) !== false
+    ) {
 
-    $car_image =
-        "https://images.unsplash.com/photo-1555215695-3004980ad54e?auto=format&fit=crop&w=1200&q=85";
+        $car_image =
+            "https://images.unsplash.com/photo-1618843479313-40f8afb4b4d8?auto=format&fit=crop&w=1200&q=85";
 
-}
+    } elseif (
+        strpos(
+            $brand_lower,
+            "audi"
+        ) !== false
+    ) {
 
-else {
+        $car_image =
+            "https://images.unsplash.com/photo-1606664515524-ed2f786a0bd6?auto=format&fit=crop&w=1200&q=85";
 
-    $car_image =
-        "https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?auto=format&fit=crop&w=1200&q=85";
+    } elseif (
+        strpos(
+            $brand_lower,
+            "bmw"
+        ) !== false
+    ) {
+
+        $car_image =
+            "https://images.unsplash.com/photo-1555215695-3004980ad54e?auto=format&fit=crop&w=1200&q=85";
+
+    } else {
+
+        $car_image =
+            "https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?auto=format&fit=crop&w=1200&q=85";
+
+    }
 
 }
 
@@ -240,8 +426,8 @@ $conn->close();
 
 ?>
 
-<!DOCTYPE html>
 
+<!DOCTYPE html>
 <html lang="en">
 
 <head>
@@ -262,18 +448,20 @@ $conn->close();
 
 /* =========================================================
    RESET
-   ========================================================= */
+========================================================= */
 
 * {
+
     margin: 0;
     padding: 0;
     box-sizing: border-box;
+
 }
 
 
 /* =========================================================
    BODY
-   ========================================================= */
+========================================================= */
 
 body {
 
@@ -291,11 +479,11 @@ body {
 
 /* =========================================================
    NAVBAR
-   ========================================================= */
+========================================================= */
 
 .navbar {
 
-    height: 72px;
+    min-height: 72px;
 
     background: #111111;
 
@@ -317,6 +505,8 @@ body {
     font-size: 30px;
 
     font-weight: 800;
+
+    text-decoration: none;
 
 }
 
@@ -359,7 +549,7 @@ body {
 
 /* =========================================================
    MAIN CONTAINER
-   ========================================================= */
+========================================================= */
 
 .container {
 
@@ -374,7 +564,7 @@ body {
 
 /* =========================================================
    PAGE TITLE
-   ========================================================= */
+========================================================= */
 
 .page-title {
 
@@ -412,7 +602,7 @@ body {
 
 /* =========================================================
    BOOKING CARD
-   ========================================================= */
+========================================================= */
 
 .booking-card {
 
@@ -423,14 +613,15 @@ body {
     overflow: hidden;
 
     box-shadow:
-        0 12px 35px rgba(0,0,0,.08);
+        0 12px 35px
+        rgba(0,0,0,.08);
 
 }
 
 
 /* =========================================================
    CAR IMAGE
-   ========================================================= */
+========================================================= */
 
 .car-image-wrapper {
 
@@ -460,7 +651,7 @@ body {
 
 /* =========================================================
    CONTENT
-   ========================================================= */
+========================================================= */
 
 .content {
 
@@ -471,7 +662,7 @@ body {
 
 /* =========================================================
    CAR DETAILS
-   ========================================================= */
+========================================================= */
 
 .brand {
 
@@ -512,18 +703,22 @@ body {
 
 /* =========================================================
    INFORMATION GRID
-   ========================================================= */
+========================================================= */
 
 .info-grid {
 
     display: grid;
 
     grid-template-columns:
-        repeat(2, minmax(0, 1fr));
+        repeat(
+            2,
+            minmax(0, 1fr)
+        );
 
     gap: 18px;
 
-    border-top: 1px solid #e5e7eb;
+    border-top:
+        1px solid #e5e7eb;
 
     padding-top: 25px;
 
@@ -566,8 +761,8 @@ body {
 
 
 /* =========================================================
-   STATUS
-   ========================================================= */
+   BOOKING STATUS
+========================================================= */
 
 .status {
 
@@ -623,8 +818,170 @@ body {
 
 
 /* =========================================================
+   PAYMENT SECTION
+========================================================= */
+
+.payment-section {
+
+    margin-top: 30px;
+
+    padding-top: 25px;
+
+    border-top:
+        1px solid #e5e7eb;
+
+}
+
+
+.payment-title {
+
+    font-size: 24px;
+
+    font-weight: bold;
+
+    margin-bottom: 18px;
+
+}
+
+
+.payment-grid {
+
+    display: grid;
+
+    grid-template-columns:
+        repeat(
+            2,
+            minmax(0, 1fr)
+        );
+
+    gap: 18px;
+
+}
+
+
+.payment-box {
+
+    background: #f8f9fb;
+
+    border-radius: 12px;
+
+    padding: 18px;
+
+}
+
+
+.payment-label {
+
+    color: #667085;
+
+    font-size: 14px;
+
+    margin-bottom: 7px;
+
+}
+
+
+.payment-value {
+
+    color: #172033;
+
+    font-size: 16px;
+
+    font-weight: bold;
+
+    word-break: break-word;
+
+}
+
+
+.payment-amount {
+
+    color: #ef3340;
+
+    font-size: 20px;
+
+}
+
+
+/* =========================================================
+   PAYMENT STATUS
+========================================================= */
+
+.payment-status {
+
+    display: inline-block;
+
+    padding: 9px 15px;
+
+    border-radius: 20px;
+
+    font-size: 13px;
+
+    font-weight: bold;
+
+}
+
+
+.payment-success {
+
+    background: #dff7e7;
+
+    color: #16733b;
+
+}
+
+
+.payment-pending {
+
+    background: #fff0c7;
+
+    color: #9a5b00;
+
+}
+
+
+.payment-failed {
+
+    background: #ffe0e0;
+
+    color: #b42318;
+
+}
+
+
+.payment-none {
+
+    background: #e4e7ec;
+
+    color: #344054;
+
+}
+
+
+/* =========================================================
+   NOT PAID MESSAGE
+========================================================= */
+
+.not-paid-message {
+
+    margin-top: 18px;
+
+    padding: 15px 18px;
+
+    background: #fff8e5;
+
+    color: #856404;
+
+    border-radius: 10px;
+
+    line-height: 1.5;
+
+}
+
+
+/* =========================================================
    BUTTONS
-   ========================================================= */
+========================================================= */
 
 .buttons {
 
@@ -668,9 +1025,7 @@ body {
 }
 
 
-/* =========================================================
-   BACK BUTTON
-   ========================================================= */
+/* Back */
 
 .back-btn {
 
@@ -688,9 +1043,7 @@ body {
 }
 
 
-/* =========================================================
-   CAR DETAILS BUTTON
-   ========================================================= */
+/* Car details */
 
 .car-btn {
 
@@ -708,9 +1061,7 @@ body {
 }
 
 
-/* =========================================================
-   CANCEL BUTTON
-   ========================================================= */
+/* Cancel */
 
 .cancel-btn {
 
@@ -730,7 +1081,7 @@ body {
 
 /* =========================================================
    CANCELLED MESSAGE
-   ========================================================= */
+========================================================= */
 
 .cancelled-message {
 
@@ -751,7 +1102,7 @@ body {
 
 /* =========================================================
    FOOTER
-   ========================================================= */
+========================================================= */
 
 footer {
 
@@ -768,13 +1119,19 @@ footer {
 
 /* =========================================================
    MOBILE
-   ========================================================= */
+========================================================= */
 
 @media (max-width: 800px) {
 
     .navbar {
 
-        padding: 0 5%;
+        padding: 18px 5%;
+
+        flex-direction: column;
+
+        gap: 18px;
+
+        height: auto;
 
     }
 
@@ -782,6 +1139,10 @@ footer {
     .nav-links {
 
         gap: 12px;
+
+        flex-wrap: wrap;
+
+        justify-content: center;
 
     }
 
@@ -807,6 +1168,13 @@ footer {
     }
 
 
+    .payment-grid {
+
+        grid-template-columns: 1fr;
+
+    }
+
+
     .buttons {
 
         flex-direction: column;
@@ -821,6 +1189,8 @@ footer {
     .container {
 
         width: 94%;
+
+        margin-top: 30px;
 
     }
 
@@ -864,16 +1234,16 @@ footer {
 
 <!-- =====================================================
      NAVBAR
-     ===================================================== -->
+===================================================== -->
 
 <nav class="navbar">
 
-
-    <div class="logo">
-
+    <a
+        href="index.php"
+        class="logo"
+    >
         CAR<span>HUB</span>
-
-    </div>
+    </a>
 
 
     <div class="nav-links">
@@ -886,8 +1256,20 @@ footer {
             Cars
         </a>
 
+        <a href="about.php">
+            About
+        </a>
+
+        <a href="contact.php">
+            Contact
+        </a>
+
         <a href="my-bookings.php">
             My Bookings
+        </a>
+
+        <a href="my-test-drives.php">
+            My Test Drives
         </a>
 
         <a href="logout.php">
@@ -901,7 +1283,7 @@ footer {
 
 <!-- =====================================================
      MAIN
-     ===================================================== -->
+===================================================== -->
 
 <div class="container">
 
@@ -913,7 +1295,7 @@ footer {
         </h1>
 
         <p>
-            Review the information for your vehicle booking.
+            Review your vehicle booking and payment information.
         </p>
 
     </div>
@@ -921,14 +1303,12 @@ footer {
 
     <!-- =================================================
          BOOKING CARD
-         ================================================= -->
+    ================================================== -->
 
     <div class="booking-card">
 
 
-        <!-- =================================================
-             CAR IMAGE
-             ================================================= -->
+        <!-- CAR IMAGE -->
 
         <div class="car-image-wrapper">
 
@@ -946,9 +1326,7 @@ footer {
         </div>
 
 
-        <!-- =================================================
-             CONTENT
-             ================================================= -->
+        <!-- CONTENT -->
 
         <div class="content">
 
@@ -982,7 +1360,7 @@ footer {
 
             <!-- =================================================
                  BOOKING INFORMATION
-                 ================================================= -->
+            ================================================== -->
 
             <div class="info-grid">
 
@@ -1020,7 +1398,8 @@ footer {
 
                         <?php
                         echo htmlspecialchars(
-                            $booking["name"] ?? $user_name
+                            $booking["name"]
+                            ?? $user_name
                         );
                         ?>
 
@@ -1041,7 +1420,8 @@ footer {
 
                         <?php
                         echo htmlspecialchars(
-                            $booking["email"] ?? $user_email
+                            $booking["email"]
+                            ?? $user_email
                         );
                         ?>
 
@@ -1062,7 +1442,8 @@ footer {
 
                         <?php
                         echo htmlspecialchars(
-                            $booking["phone"] ?? "—"
+                            $booking["phone"]
+                            ?? "—"
                         );
                         ?>
 
@@ -1111,7 +1492,7 @@ footer {
                 </div>
 
 
-                <!-- STATUS -->
+                <!-- BOOKING STATUS -->
 
                 <div class="info-box">
 
@@ -1140,8 +1521,365 @@ footer {
 
 
             <!-- =================================================
+                 PAYMENT INFORMATION
+            ================================================== -->
+
+            <div class="payment-section">
+
+                <div class="payment-title">
+                    Payment Information
+                </div>
+
+
+                <?php if ($payment_id > 0): ?>
+
+
+                    <div class="payment-grid">
+
+
+                        <!-- PAYMENT ID -->
+
+                        <div class="payment-box">
+
+                            <div class="payment-label">
+                                Payment ID
+                            </div>
+
+                            <div class="payment-value">
+
+                                #
+
+                                <?php
+                                echo $payment_id;
+                                ?>
+
+                            </div>
+
+                        </div>
+
+
+                        <!-- PAYMENT METHOD -->
+
+                        <div class="payment-box">
+
+                            <div class="payment-label">
+                                Payment Method
+                            </div>
+
+                            <div class="payment-value">
+
+                                <?php
+                                echo htmlspecialchars(
+                                    $payment_method
+                                    ?: "—"
+                                );
+                                ?>
+
+                            </div>
+
+                        </div>
+
+
+                        <!-- PAYMENT AMOUNT -->
+
+                        <div class="payment-box">
+
+                            <div class="payment-label">
+                                Payment Amount
+                            </div>
+
+                            <div class="payment-value payment-amount">
+
+                                ₹<?php
+                                echo number_format(
+                                    $payment_amount,
+                                    2
+                                );
+                                ?>
+
+                            </div>
+
+                        </div>
+
+
+                        <!-- PAYMENT STATUS -->
+
+                        <div class="payment-box">
+
+                            <div class="payment-label">
+                                Payment Status
+                            </div>
+
+                            <div class="payment-value">
+
+                                <span
+                                    class="payment-status <?php
+                                    echo htmlspecialchars(
+                                        $payment_status_class
+                                    );
+                                    ?>"
+                                >
+
+                                    <?php
+
+                                    if (
+                                        $payment_status ===
+                                        "Pending"
+                                    ) {
+
+                                        echo "Payment Due at Pickup";
+
+                                    } elseif (
+                                        $payment_status !== ""
+                                    ) {
+
+                                        echo htmlspecialchars(
+                                            $payment_status
+                                        );
+
+                                    } else {
+
+                                        echo "Pending";
+
+                                    }
+
+                                    ?>
+
+                                </span>
+
+                            </div>
+
+                        </div>
+
+
+                        <!-- PAYMENT REFERENCE -->
+
+                        <div class="payment-box">
+
+                            <div class="payment-label">
+                                Payment Reference
+                            </div>
+
+                            <div class="payment-value">
+
+                                <?php
+                                echo htmlspecialchars(
+                                    $order_reference
+                                    ?: "—"
+                                );
+                                ?>
+
+                            </div>
+
+                        </div>
+
+
+                        <!-- TRANSACTION ID -->
+
+                        <div class="payment-box">
+
+                            <div class="payment-label">
+                                Transaction ID
+                            </div>
+
+                            <div class="payment-value">
+
+                                <?php
+
+                                if (
+                                    $transaction_id !== ""
+                                ) {
+
+                                    echo htmlspecialchars(
+                                        $transaction_id
+                                    );
+
+                                } else {
+
+                                    echo "Not available";
+
+                                }
+
+                                ?>
+
+                            </div>
+
+                        </div>
+
+
+                        <!-- PAYMENT DATE -->
+
+                        <div class="payment-box">
+
+                            <div class="payment-label">
+                                Payment Record Date
+                            </div>
+
+                            <div class="payment-value">
+
+                                <?php
+
+                                if (
+                                    !empty(
+                                        $booking[
+                                            "payment_created_at"
+                                        ]
+                                    )
+                                ) {
+
+                                    echo htmlspecialchars(
+                                        date(
+                                            "d M Y, h:i A",
+                                            strtotime(
+                                                $booking[
+                                                    "payment_created_at"
+                                                ]
+                                            )
+                                        )
+                                    );
+
+                                } else {
+
+                                    echo "—";
+
+                                }
+
+                                ?>
+
+                            </div>
+
+                        </div>
+
+
+                    </div>
+
+
+                    <?php if ($payment_status === "Pending"): ?>
+
+                        <div class="not-paid-message">
+
+                            <strong>
+                                Cash on Pickup
+                            </strong>
+
+                            <br>
+
+                            Your booking has been recorded.
+                            Payment will be collected when
+                            you pick up the vehicle.
+
+                        </div>
+
+                    <?php elseif (
+                        $payment_status === "Test Successful"
+                    ): ?>
+
+                        <div class="not-paid-message"
+                             style="
+                                background:#e8f8ed;
+                                color:#16733b;
+                             ">
+
+                            <strong>
+                                Payment Recorded
+                            </strong>
+
+                            <br>
+
+                            Your payment record has been
+                            successfully stored in the
+                            CarHub database.
+
+                        </div>
+
+                    <?php endif; ?>
+
+
+                <?php else: ?>
+
+
+                    <!-- NO PAYMENT RECORD -->
+
+                    <div class="payment-grid">
+
+
+                        <div class="payment-box">
+
+                            <div class="payment-label">
+                                Payment Status
+                            </div>
+
+                            <div class="payment-value">
+
+                                <span class="payment-status payment-none">
+                                    Not Paid Yet
+                                </span>
+
+                            </div>
+
+                        </div>
+
+
+                        <div class="payment-box">
+
+                            <div class="payment-label">
+                                Amount Due
+                            </div>
+
+                            <div class="payment-value payment-amount">
+
+                                ₹<?php
+                                echo number_format(
+                                    $price,
+                                    2
+                                );
+                                ?>
+
+                            </div>
+
+                        </div>
+
+
+                    </div>
+
+
+                    <div class="not-paid-message">
+
+                        <strong>
+                            Payment Pending
+                        </strong>
+
+                        <br>
+
+                        No payment record has been created
+                        for this booking yet.
+
+                    </div>
+
+
+                    <!-- PROCEED TO PAYMENT -->
+
+                    <a
+                        href="payment.php?booking_id=<?php echo (int)$booking["id"]; ?>"
+                        class="btn cancel-btn"
+                        style="
+                            margin-top:18px;
+                            width:100%;
+                        "
+                    >
+                        Proceed to Payment
+                    </a>
+
+
+                <?php endif; ?>
+
+
+            </div>
+
+
+            <!-- =================================================
                  ACTION BUTTONS
-                 ================================================= -->
+            ================================================== -->
 
             <div class="buttons">
 
@@ -1156,12 +1894,12 @@ footer {
                 </a>
 
 
-                <!-- VIEW CAR DETAILS -->
+                <!-- VIEW CAR -->
 
                 <?php if ($car_id > 0): ?>
 
                     <a
-                        href="car-details.php?car_id=<?php echo $car_id; ?>"
+                        href="car-details.php?id=<?php echo $car_id; ?>"
                         class="btn car-btn"
                     >
                         View Car Details
@@ -1170,13 +1908,14 @@ footer {
                 <?php endif; ?>
 
 
-                <!-- CANCEL BOOKING -->
+                <!-- CANCEL -->
 
                 <?php if ($can_cancel): ?>
 
                     <a
                         href="cancel-booking.php?booking_id=<?php echo (int)$booking["id"]; ?>"
                         class="btn cancel-btn"
+                        onclick="return confirm('Are you sure you want to cancel this booking?');"
                     >
                         Cancel Booking
                     </a>
@@ -1187,9 +1926,7 @@ footer {
             </div>
 
 
-            <!-- =================================================
-                 NON-CANCELLABLE MESSAGE
-                 ================================================= -->
+            <!-- NON-CANCELLABLE MESSAGE -->
 
             <?php if (!$can_cancel): ?>
 
@@ -1220,7 +1957,7 @@ footer {
 
 <!-- =====================================================
      FOOTER
-     ===================================================== -->
+===================================================== -->
 
 <footer>
 

@@ -1,17 +1,13 @@
 <?php
 
-$conn = new mysqli("localhost", "root", "", "carhub");
+session_start();
 
-if ($conn->connect_error) {
-    die("Database connection failed: " . $conn->connect_error);
-}
-
-$conn->set_charset("utf8mb4");
+require_once "config/db.php";
 
 
-/* ==============================
+/* =========================================================
    GET CAR ID
-============================== */
+========================================================= */
 
 $car_id = isset($_GET['car_id']) ? (int)$_GET['car_id'] : 0;
 
@@ -20,58 +16,132 @@ if ($car_id <= 0) {
 }
 
 
-/* ==============================
-   GET CAR
-============================== */
+/* =========================================================
+   GET CAR DETAILS
+========================================================= */
 
-$stmt = $conn->prepare("SELECT * FROM cars WHERE id = ?");
+$stmt = $conn->prepare("
+    SELECT *
+    FROM cars
+    WHERE id = ?
+");
+
 $stmt->bind_param("i", $car_id);
 $stmt->execute();
 
 $result = $stmt->get_result();
 
 if ($result->num_rows === 0) {
+    $stmt->close();
     die("Car not found.");
 }
 
 $car = $result->fetch_assoc();
+
+$stmt->close();
+
+
+/* =========================================================
+   CAR INFORMATION
+========================================================= */
 
 $brand = $car['brand'] ?? 'Car';
 $model = $car['model'] ?? 'Vehicle';
 $price = $car['price'] ?? 0;
 
 
-/* ==============================
+/* =========================================================
    CAR IMAGE
-============================== */
+========================================================= */
 
-$brand_lower = strtolower($brand);
+/*
+   First try the image stored in the database.
 
-if (strpos($brand_lower, "mercedes") !== false) {
+   If it is a valid URL, use it.
 
-    $car_image =
-        "https://images.unsplash.com/photo-1618843479313-40f8afb4b4d8?auto=format&fit=crop&w=1200&q=85";
+   If it is a local file, check whether the file exists.
 
-} elseif (strpos($brand_lower, "audi") !== false) {
+   If neither works, use a brand-based fallback image.
+*/
 
-    $car_image =
-        "https://images.unsplash.com/photo-1606664515524-ed2f786a0bd6?auto=format&fit=crop&w=1200&q=85";
+$car_image = "";
 
-} elseif (strpos($brand_lower, "bmw") !== false) {
+if (!empty($car['image'])) {
 
-    $car_image =
-        "https://images.unsplash.com/photo-1555215695-3004980ad54e?auto=format&fit=crop&w=1200&q=85";
+    $db_image = trim($car['image']);
 
-} else {
+    /* Remote image */
+    if (
+        filter_var($db_image, FILTER_VALIDATE_URL)
+    ) {
 
-    $car_image =
-        "https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?auto=format&fit=crop&w=1200&q=85";
+        $car_image = $db_image;
+
+    }
+
+    /* Local image */
+    else {
+
+        $clean_path = ltrim($db_image, "/\\");
+
+        if (file_exists(__DIR__ . DIRECTORY_SEPARATOR . $clean_path)) {
+
+            $car_image = $clean_path;
+
+        }
+    }
 }
 
 
-/* ==============================
+/* =========================================================
+   FALLBACK IMAGE
+========================================================= */
+
+if ($car_image === "") {
+
+    $brand_lower = strtolower($brand);
+
+    if (strpos($brand_lower, "mercedes") !== false) {
+
+        $car_image =
+            "https://images.unsplash.com/photo-1618843479313-40f8afb4b4d8?auto=format&fit=crop&w=1200&q=85";
+
+    } elseif (strpos($brand_lower, "audi") !== false) {
+
+        $car_image =
+            "https://images.unsplash.com/photo-1606664515524-ed2f786a0bd6?auto=format&fit=crop&w=1200&q=85";
+
+    } elseif (strpos($brand_lower, "bmw") !== false) {
+
+        $car_image =
+            "https://images.unsplash.com/photo-1555215695-3004980ad54e?auto=format&fit=crop&w=1200&q=85";
+
+    } elseif (strpos($brand_lower, "toyota") !== false) {
+
+        $car_image =
+            "https://images.unsplash.com/photo-1623869675781-80aa31012a5a?auto=format&fit=crop&w=1200&q=85";
+
+    } elseif (strpos($brand_lower, "ford") !== false) {
+
+        $car_image =
+            "https://images.unsplash.com/photo-1542282088-72c9c27ed0cd?auto=format&fit=crop&w=1200&q=85";
+
+    } elseif (strpos($brand_lower, "porsche") !== false) {
+
+        $car_image =
+            "https://images.unsplash.com/photo-1503376780353-7e6692767b70?auto=format&fit=crop&w=1200&q=85";
+
+    } else {
+
+        $car_image =
+            "https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?auto=format&fit=crop&w=1200&q=85";
+    }
+}
+
+
+/* =========================================================
    FORM VALUES
-============================== */
+========================================================= */
 
 $error = "";
 
@@ -82,9 +152,43 @@ $test_drive_date = "";
 $test_drive_time = "";
 
 
-/* ==============================
+/* =========================================================
+   AUTO-FILL LOGGED-IN USER
+========================================================= */
+
+if (isset($_SESSION['user_id'])) {
+
+    $user_id = (int)$_SESSION['user_id'];
+
+    $user_stmt = $conn->prepare("
+        SELECT name, email
+        FROM users
+        WHERE id = ?
+    ");
+
+    if ($user_stmt) {
+
+        $user_stmt->bind_param("i", $user_id);
+        $user_stmt->execute();
+
+        $user_result = $user_stmt->get_result();
+
+        if ($user_result->num_rows > 0) {
+
+            $user = $user_result->fetch_assoc();
+
+            $name = $user['name'];
+            $email = $user['email'];
+        }
+
+        $user_stmt->close();
+    }
+}
+
+
+/* =========================================================
    SUBMIT TEST DRIVE
-============================== */
+========================================================= */
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
@@ -95,7 +199,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     $test_drive_time = trim($_POST["test_drive_time"] ?? "");
 
 
-    /* VALIDATION */
+    /* =====================================================
+       VALIDATION
+    ===================================================== */
 
     if (
         $name === "" ||
@@ -107,87 +213,88 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
         $error = "Please fill in all fields.";
 
+    } elseif (strlen($name) < 2) {
+
+        $error = "Please enter a valid name.";
+
     } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
 
         $error = "Please enter a valid email address.";
 
+    } elseif (!preg_match('/^[0-9+\-\s()]{7,20}$/', $phone)) {
+
+        $error = "Please enter a valid phone number.";
+
+    } elseif ($test_drive_date < date('Y-m-d')) {
+
+        $error = "Please select today or a future date.";
+
     } else {
 
+        /* =================================================
+           INSERT TEST DRIVE
+        ================================================= */
 
-        /* ==============================
-           CHECK TABLE
-        ============================== */
+        $insert = $conn->prepare("
+            INSERT INTO test_drives
+            (
+                car_id,
+                name,
+                email,
+                phone,
+                test_drive_date,
+                test_drive_time,
+                status
+            )
+            VALUES
+            (?, ?, ?, ?, ?, ?, 'Pending')
+        ");
 
-        $table_check = $conn->query("SHOW TABLES LIKE 'test_drives'");
 
+        if (!$insert) {
 
-        if (!$table_check || $table_check->num_rows === 0) {
-
-            $error = "Test drive table could not be accessed.";
+            $error = "Unable to prepare the test drive request.";
 
         } else {
 
-
-            /* ==============================
-               INSERT
-            ============================== */
-
-            $insert = $conn->prepare("
-                INSERT INTO test_drives
-                (
-                    car_id,
-                    name,
-                    email,
-                    phone,
-                    test_drive_date,
-                    test_drive_time,
-                    status
-                )
-                VALUES
-                (?, ?, ?, ?, ?, ?, 'Pending')
-            ");
+            $insert->bind_param(
+                "isssss",
+                $car_id,
+                $name,
+                $email,
+                $phone,
+                $test_drive_date,
+                $test_drive_time
+            );
 
 
-            if (!$insert) {
+            /* =============================================
+               EXECUTE
+            ============================================= */
 
-                $error = "Unable to prepare the test drive request.";
+            if ($insert->execute()) {
+
+                $test_drive_id = $conn->insert_id;
+
+                $insert->close();
+
+                /*
+                   Redirect to success page
+                */
+
+                header(
+                    "Location: test-drive-success.php?" .
+                    "test_drive_id=" . urlencode($test_drive_id) .
+                    "&car_name=" . urlencode($brand . " " . $model) .
+                    "&date=" . urlencode($test_drive_date) .
+                    "&time=" . urlencode($test_drive_time)
+                );
+
+                exit;
 
             } else {
 
-                $insert->bind_param(
-                    "isssss",
-                    $car_id,
-                    $name,
-                    $email,
-                    $phone,
-                    $test_drive_date,
-                    $test_drive_time
-                );
-
-
-                if ($insert->execute()) {
-
-                    $test_drive_id = $conn->insert_id;
-
-                    /*
-                     * Redirect to confirmation page.
-                     */
-
-                    header(
-                        "Location: test-drive-success.php?" .
-                        "test_drive_id=" . urlencode($test_drive_id) .
-                        "&car_name=" . urlencode($brand . " " . $model) .
-                        "&date=" . urlencode($test_drive_date) .
-                        "&time=" . urlencode($test_drive_time)
-                    );
-
-                    exit;
-
-                } else {
-
-                    $error = "Unable to submit your test drive request.";
-
-                }
+                $error = "Unable to submit your test drive request.";
 
                 $insert->close();
             }
@@ -197,7 +304,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
 ?>
 
+
 <!DOCTYPE html>
+
 <html lang="en">
 
 <head>
@@ -213,12 +322,20 @@ Test Drive - <?php echo htmlspecialchars($brand . " " . $model); ?> | CarHub
 
 <style>
 
+/* =========================================================
+   RESET
+========================================================= */
+
 * {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
 }
 
+
+/* =========================================================
+   BODY
+========================================================= */
 
 body {
     font-family: Arial, Helvetica, sans-serif;
@@ -227,9 +344,9 @@ body {
 }
 
 
-/* ==============================
+/* =========================================================
    NAVBAR
-============================== */
+========================================================= */
 
 .navbar {
     height: 72px;
@@ -273,9 +390,9 @@ body {
 }
 
 
-/* ==============================
-   MAIN
-============================== */
+/* =========================================================
+   MAIN CONTAINER
+========================================================= */
 
 .container {
     width: 90%;
@@ -283,6 +400,10 @@ body {
     margin: 50px auto;
 }
 
+
+/* =========================================================
+   PAGE TITLE
+========================================================= */
 
 .page-title {
     text-align: center;
@@ -307,9 +428,9 @@ body {
 }
 
 
-/* ==============================
+/* =========================================================
    GRID
-============================== */
+========================================================= */
 
 .test-drive-grid {
     display: grid;
@@ -318,9 +439,9 @@ body {
 }
 
 
-/* ==============================
+/* =========================================================
    CAR CARD
-============================== */
+========================================================= */
 
 .car-card {
     background: white;
@@ -369,9 +490,9 @@ body {
 }
 
 
-/* ==============================
+/* =========================================================
    FORM CARD
-============================== */
+========================================================= */
 
 .form-card {
     background: white;
@@ -396,9 +517,9 @@ body {
 }
 
 
-/* ==============================
+/* =========================================================
    ERROR
-============================== */
+========================================================= */
 
 .error {
     background: #fff0f0;
@@ -414,9 +535,9 @@ body {
 }
 
 
-/* ==============================
+/* =========================================================
    FORM
-============================== */
+========================================================= */
 
 .form-group {
     margin-bottom: 22px;
@@ -455,9 +576,9 @@ body {
 }
 
 
-/* ==============================
-   SUBMIT
-============================== */
+/* =========================================================
+   SUBMIT BUTTON
+========================================================= */
 
 .submit-btn {
     width: 100%;
@@ -485,9 +606,9 @@ body {
 }
 
 
-/* ==============================
+/* =========================================================
    FOOTER
-============================== */
+========================================================= */
 
 footer {
     background: #111;
@@ -502,9 +623,9 @@ footer {
 }
 
 
-/* ==============================
+/* =========================================================
    MOBILE
-============================== */
+========================================================= */
 
 @media(max-width: 850px) {
 
@@ -542,9 +663,9 @@ footer {
 <body>
 
 
-<!-- ==============================
+<!-- =======================================================
      NAVBAR
-============================== -->
+======================================================= -->
 
 <nav class="navbar">
 
@@ -559,17 +680,21 @@ footer {
             Home
         </a>
 
+
         <a href="cars.php">
             Cars
         </a>
+
 
         <a href="about.php">
             About
         </a>
 
+
         <a href="contact.php">
             Contact
         </a>
+
 
         <a href="my-bookings.php">
             My Bookings
@@ -580,18 +705,21 @@ footer {
 </nav>
 
 
-<!-- ==============================
+<!-- =======================================================
      MAIN
-============================== -->
+======================================================= -->
 
 <div class="container">
 
+
+    <!-- PAGE TITLE -->
 
     <div class="page-title">
 
         <h1>
             Book a <span>Test Drive</span>
         </h1>
+
 
         <p>
             Experience your selected car before making your decision.
@@ -600,23 +728,27 @@ footer {
     </div>
 
 
+
     <div class="test-drive-grid">
 
 
-        <!-- ==============================
-             CAR
-        ============================== -->
+        <!-- =================================================
+             CAR CARD
+        ================================================== -->
 
         <div class="car-card">
+
 
             <img
                 src="<?php echo htmlspecialchars($car_image); ?>"
                 alt="<?php echo htmlspecialchars($brand . " " . $model); ?>"
                 class="car-image"
+                onerror="this.onerror=null; this.src='https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?auto=format&fit=crop&w=1200&q=85';"
             >
 
 
             <div class="car-info">
+
 
                 <div class="car-brand">
 
@@ -644,14 +776,16 @@ footer {
 
                 </div>
 
+
             </div>
 
         </div>
 
 
-        <!-- ==============================
-             FORM
-        ============================== -->
+
+        <!-- =================================================
+             FORM CARD
+        ================================================== -->
 
         <div class="form-card">
 
@@ -668,6 +802,9 @@ footer {
             </p>
 
 
+
+            <!-- ERROR -->
+
             <?php if ($error !== ""): ?>
 
                 <div class="error">
@@ -681,6 +818,9 @@ footer {
             <?php endif; ?>
 
 
+
+            <!-- FORM -->
+
             <form method="POST">
 
 
@@ -691,6 +831,7 @@ footer {
                     <label>
                         Full Name *
                     </label>
+
 
                     <input
                         type="text"
@@ -703,6 +844,7 @@ footer {
                 </div>
 
 
+
                 <!-- EMAIL -->
 
                 <div class="form-group">
@@ -710,6 +852,7 @@ footer {
                     <label>
                         Email Address *
                     </label>
+
 
                     <input
                         type="email"
@@ -722,6 +865,7 @@ footer {
                 </div>
 
 
+
                 <!-- PHONE -->
 
                 <div class="form-group">
@@ -729,6 +873,7 @@ footer {
                     <label>
                         Phone Number *
                     </label>
+
 
                     <input
                         type="tel"
@@ -741,6 +886,7 @@ footer {
                 </div>
 
 
+
                 <!-- DATE -->
 
                 <div class="form-group">
@@ -748,6 +894,7 @@ footer {
                     <label>
                         Preferred Date *
                     </label>
+
 
                     <input
                         type="date"
@@ -760,6 +907,7 @@ footer {
                 </div>
 
 
+
                 <!-- TIME -->
 
                 <div class="form-group">
@@ -767,6 +915,7 @@ footer {
                     <label>
                         Preferred Time *
                     </label>
+
 
                     <input
                         type="time"
@@ -778,7 +927,8 @@ footer {
                 </div>
 
 
-                <!-- BUTTON -->
+
+                <!-- SUBMIT -->
 
                 <button
                     type="submit"
@@ -790,16 +940,20 @@ footer {
 
             </form>
 
+
         </div>
 
+
     </div>
+
 
 </div>
 
 
-<!-- ==============================
+
+<!-- =======================================================
      FOOTER
-============================== -->
+======================================================= -->
 
 <footer>
 
@@ -813,9 +967,8 @@ footer {
 
 </html>
 
-<?php
 
-$stmt->close();
+<?php
 
 $conn->close();
 

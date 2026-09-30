@@ -1,4 +1,5 @@
 <?php
+
 session_start();
 
 /* =========================================================
@@ -11,10 +12,6 @@ session_start();
    1. CHECK LOGIN
    ========================================================= */
 
-/*
-   This accepts the common session names used by the project.
-   If any one exists, the user is considered logged in.
-*/
 $logged_in = false;
 
 if (
@@ -26,11 +23,11 @@ if (
     $logged_in = true;
 }
 
-/*
-   User must be logged in to book.
-*/
 if (!$logged_in) {
-    header("Location: login.php?redirect=" . urlencode($_SERVER['REQUEST_URI']));
+    header(
+        "Location: login.php?redirect=" .
+        urlencode($_SERVER['REQUEST_URI'])
+    );
     exit;
 }
 
@@ -39,30 +36,16 @@ if (!$logged_in) {
    2. DATABASE CONNECTION
    ========================================================= */
 
-$host = "localhost";
-$db_user = "root";
-$db_password = "";
-$db_name = "carhub";
-
-$conn = new mysqli(
-    $host,
-    $db_user,
-    $db_password,
-    $db_name
-);
-
-if ($conn->connect_error) {
-    die("Database connection failed: " . htmlspecialchars($conn->connect_error));
-}
-
-$conn->set_charset("utf8mb4");
+require_once "config/db.php";
 
 
 /* =========================================================
    3. GET CAR ID
    ========================================================= */
 
-$car_id = isset($_GET['car_id']) ? (int)$_GET['car_id'] : 0;
+$car_id = isset($_GET['car_id'])
+    ? (int)$_GET['car_id']
+    : 0;
 
 if ($car_id <= 0) {
     die("Invalid car selected.");
@@ -110,32 +93,31 @@ $price = $car['price'] ?? 0;
    6. CAR IMAGE
    ========================================================= */
 
-/*
-   Your database may contain an image filename, but your
-   current project has also been using remote images.
-
-   We first use the database image if it is a valid URL/path.
-   Otherwise we use a reliable brand-based fallback.
-*/
-
 $db_image = trim($car['image'] ?? '');
 
 $brand_lower = strtolower($brand);
 
+$car_image = "";
+
+
+/*
+   First try the image stored in the database.
+*/
+
 if ($db_image !== '') {
 
-    if (
-        filter_var($db_image, FILTER_VALIDATE_URL)
-    ) {
+    /* Remote image URL */
+
+    if (filter_var($db_image, FILTER_VALIDATE_URL)) {
+
         $car_image = $db_image;
+
     } else {
 
         /*
-           If database stores something like:
-           uploads/audi.jpg
-           images/audi.jpg
-           audi.jpg
+           Try common local image locations.
         */
+
         $possible_paths = [
             $db_image,
             "uploads/" . $db_image,
@@ -157,38 +139,20 @@ if ($db_image !== '') {
         }
 
         if ($found_image !== "") {
+
             $car_image = $found_image;
-        } else {
 
-            /*
-               Fallback images
-            */
-
-            if (strpos($brand_lower, 'mercedes') !== false) {
-
-                $car_image =
-                    "https://images.unsplash.com/photo-1618843479313-40f8afb4b4d8?auto=format&fit=crop&w=1200&q=85";
-
-            } elseif (strpos($brand_lower, 'audi') !== false) {
-
-                $car_image =
-                    "https://images.unsplash.com/photo-1606664515524-ed2f786a0bd6?auto=format&fit=crop&w=1200&q=85";
-
-            } elseif (strpos($brand_lower, 'bmw') !== false) {
-
-                $car_image =
-                    "https://images.unsplash.com/photo-1555215695-3004980ad54e?auto=format&fit=crop&w=1200&q=85";
-
-            } else {
-
-                $car_image =
-                    "https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?auto=format&fit=crop&w=1200&q=85";
-            }
         }
-
     }
+}
 
-} else {
+
+/*
+   If no valid database image was found,
+   use brand-based fallback images.
+*/
+
+if ($car_image === '') {
 
     if (strpos($brand_lower, 'mercedes') !== false) {
 
@@ -224,8 +188,9 @@ $user_phone = "";
 
 
 /*
-   Try to get the user ID from the session.
+   Get user ID from session.
 */
+
 if (isset($_SESSION['user_id'])) {
 
     $user_id = (int)$_SESSION['user_id'];
@@ -237,22 +202,34 @@ if (isset($_SESSION['user_id'])) {
 
 
 /*
-   Try to get name/email from session first.
+   Get name from session.
 */
+
 if (isset($_SESSION['name'])) {
+
     $user_name = $_SESSION['name'];
+
 } elseif (isset($_SESSION['user_name'])) {
+
     $user_name = $_SESSION['user_name'];
 }
 
+
+/*
+   Get email from session.
+*/
+
 if (isset($_SESSION['email'])) {
+
     $user_email = $_SESSION['email'];
 }
 
 
 /*
-   If we have a user ID, try to get more information from users table.
+   If we have a user ID, get information
+   from the users table.
 */
+
 if ($user_id > 0) {
 
     $user_stmt = $conn->prepare("
@@ -275,24 +252,27 @@ if ($user_id > 0) {
         if ($user) {
 
             if ($user_name === "") {
+
                 $user_name =
-                    $user['name']
-                    ?? $user['full_name']
-                    ?? $user['username']
-                    ?? "";
+                    $user['name'] ??
+                    $user['full_name'] ??
+                    $user['username'] ??
+                    "";
             }
 
             if ($user_email === "") {
+
                 $user_email =
-                    $user['email']
-                    ?? "";
+                    $user['email'] ??
+                    "";
             }
 
             if ($user_phone === "") {
+
                 $user_phone =
-                    $user['phone']
-                    ?? $user['phone_number']
-                    ?? "";
+                    $user['phone'] ??
+                    $user['phone_number'] ??
+                    "";
             }
         }
     }
@@ -300,16 +280,12 @@ if ($user_id > 0) {
 
 
 /* =========================================================
-   8. BOOKING FORM
+   8. BOOKING FORM VARIABLES
    ========================================================= */
 
 $success = "";
 $error = "";
 
-
-/*
-   Preserve submitted values.
-*/
 $name = $user_name;
 $email = $user_email;
 $phone = $user_phone;
@@ -328,7 +304,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     $booking_date = trim($_POST['booking_date'] ?? '');
 
 
-    /* Basic validation */
+    /* -----------------------------------------------------
+       Basic validation
+       ----------------------------------------------------- */
 
     if (
         $name === '' ||
@@ -343,91 +321,88 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
         $error = "Please enter a valid email address.";
 
+    } elseif (!preg_match('/^[0-9+\-\s()]{7,20}$/', $phone)) {
+
+        $error = "Please enter a valid phone number.";
+
     } elseif ($booking_date < date('Y-m-d')) {
 
-        $error = "Please select a valid booking date.";
+        $error = "Please select today or a future booking date.";
 
     } else {
 
         /*
-           Make sure bookings table exists.
+           Insert booking into the bookings table.
+
+           Existing database structure:
+
+           car_id
+           name
+           email
+           phone
+           booking_date
+           status
         */
 
-        $table_check = $conn->query("
-            SHOW TABLES LIKE 'bookings'
+        $insert = $conn->prepare("
+            INSERT INTO bookings
+            (
+                car_id,
+                name,
+                email,
+                phone,
+                booking_date,
+                status
+            )
+            VALUES (?, ?, ?, ?, ?, 'Pending')
         ");
 
-        if (!$table_check || $table_check->num_rows === 0) {
+        if (!$insert) {
 
-            $error = "The bookings table does not exist. Please create the bookings table first.";
+            $error = "Unable to prepare the booking request.";
 
         } else {
 
-            /*
-               Insert booking.
+            $insert->bind_param(
+                "issss",
+                $car_id,
+                $name,
+                $email,
+                $phone,
+                $booking_date
+            );
 
-               This matches the booking structure already
-               used by your CarHub project:
-               car_id, name, email, phone, booking_date, status
-            */
 
-            $insert = $conn->prepare("
-                INSERT INTO bookings
-                (
-                    car_id,
-                    name,
-                    email,
-                    phone,
-                    booking_date,
-                    status
-                )
-                VALUES (?, ?, ?, ?, ?, 'Pending')
-            ");
+            if ($insert->execute()) {
 
-            if (!$insert) {
+                /*
+                   Get the newly created booking ID.
+                */
 
-                $error = "Unable to prepare the booking request.";
+                $booking_id = $conn->insert_id;
+
+
+                /*
+                   Redirect to booking success page.
+                   This prevents duplicate submissions
+                   when the page is refreshed.
+                */
+
+                header(
+                    "Location: booking-success.php?booking_id=" .
+                    (int)$booking_id
+                );
+
+                exit;
 
             } else {
 
-                $insert->bind_param(
-                    "issss",
-                    $car_id,
-                    $name,
-                    $email,
-                    $phone,
-                    $booking_date
-                );
-
-                if ($insert->execute()) {
-
-                    /*
-                       Save booking ID so the success page can
-                       display it if needed.
-                    */
-
-                    $booking_id = $conn->insert_id;
-
-                    /*
-                       Redirect to success page.
-                    */
-
-                    header(
-                        "Location: booking-success.php?booking_id=" .
-                        (int)$booking_id
-                    );
-
-                    exit;
-
-                } else {
-
-                    $error =
-                        "Unable to submit booking request. " .
-                        htmlspecialchars($insert->error);
-                }
-
-                $insert->close();
+                $error =
+                    "Unable to submit booking request. " .
+                    htmlspecialchars($insert->error);
             }
+
+            $insert->close();
         }
     }
 }
@@ -440,422 +415,431 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 $car_name = trim($brand . " " . $model);
 
 ?>
+
 <!DOCTYPE html>
 <html lang="en">
 
 <head>
 
-<meta charset="UTF-8">
+    <meta charset="UTF-8">
 
-<meta
-    name="viewport"
-    content="width=device-width, initial-scale=1.0"
->
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
 
-<title>
-    Book <?php echo htmlspecialchars($car_name); ?> | CarHub
-</title>
+    <title>
+        Book <?php echo htmlspecialchars($car_name); ?> | CarHub
+    </title>
 
 
-<style>
+    <style>
 
-/* =========================================================
-   RESET
-   ========================================================= */
+        /* =====================================================
+           RESET
+           ===================================================== */
 
-* {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-}
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
 
 
-/* =========================================================
-   BODY
-   ========================================================= */
+        /* =====================================================
+           BODY
+           ===================================================== */
 
-body {
-    font-family: Arial, Helvetica, sans-serif;
-    background: #f4f5f7;
-    color: #172033;
-    min-height: 100vh;
-}
+        body {
+            font-family: Arial, Helvetica, sans-serif;
+            background: #f4f5f7;
+            color: #172033;
+            min-height: 100vh;
+        }
 
 
-/* =========================================================
-   NAVBAR
-   ========================================================= */
+        /* =====================================================
+           NAVBAR
+           ===================================================== */
 
-.navbar {
-    height: 72px;
-    background: #111111;
+        .navbar {
+            height: 72px;
+            background: #111111;
 
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
 
-    padding: 0 8%;
-}
+            padding: 0 8%;
+        }
 
 
-.logo {
-    color: white;
-    font-size: 30px;
-    font-weight: 800;
-    letter-spacing: -1px;
-}
+        .logo {
+            color: white;
+            font-size: 30px;
+            font-weight: 800;
+            letter-spacing: -1px;
+        }
 
 
-.logo span {
-    color: #ef3340;
-}
+        .logo span {
+            color: #ef3340;
+        }
 
 
-.nav-links {
-    display: flex;
-    align-items: center;
-    gap: 28px;
-}
+        .nav-links {
+            display: flex;
+            align-items: center;
+            gap: 28px;
+        }
 
 
-.nav-links a {
-    color: white;
-    text-decoration: none;
-    font-size: 15px;
-    transition: 0.2s;
-}
+        .nav-links a {
+            color: white;
+            text-decoration: none;
+            font-size: 15px;
+            transition: 0.2s;
+        }
 
 
-.nav-links a:hover {
-    color: #ef3340;
-}
+        .nav-links a:hover {
+            color: #ef3340;
+        }
 
 
-/* =========================================================
-   MAIN CONTAINER
-   ========================================================= */
+        /* =====================================================
+           MAIN CONTAINER
+           ===================================================== */
 
-.container {
-    width: 90%;
-    max-width: 1200px;
-    margin: 45px auto 70px;
-}
+        .container {
+            width: 90%;
+            max-width: 1200px;
+            margin: 45px auto 70px;
+        }
 
 
-/* =========================================================
-   PAGE HEADER
-   ========================================================= */
+        /* =====================================================
+           PAGE HEADER
+           ===================================================== */
 
-.page-header {
-    text-align: center;
-    margin-bottom: 38px;
-}
+        .page-header {
+            text-align: center;
+            margin-bottom: 38px;
+        }
 
 
-.page-header h1 {
-    font-size: 42px;
-    line-height: 1.15;
-    margin-bottom: 12px;
-}
+        .page-header h1 {
+            font-size: 42px;
+            line-height: 1.15;
+            margin-bottom: 12px;
+        }
 
 
-.page-header h1 span {
-    color: #ef3340;
-}
+        .page-header h1 span {
+            color: #ef3340;
+        }
 
 
-.page-header p {
-    color: #667085;
-    font-size: 18px;
-}
+        .page-header p {
+            color: #667085;
+            font-size: 18px;
+        }
 
 
-/* =========================================================
-   BOOKING GRID
-   ========================================================= */
+        /* =====================================================
+           BOOKING GRID
+           ===================================================== */
 
-.booking-grid {
-    display: grid;
-    grid-template-columns: 1fr 1.15fr;
-    gap: 35px;
-    align-items: start;
-}
+        .booking-grid {
+            display: grid;
+            grid-template-columns: 1fr 1.15fr;
+            gap: 35px;
+            align-items: start;
+        }
 
 
-/* =========================================================
-   CAR CARD
-   ========================================================= */
+        /* =====================================================
+           CAR CARD
+           ===================================================== */
 
-.car-card {
-    background: white;
-    border-radius: 20px;
-    overflow: hidden;
+        .car-card {
+            background: white;
+            border-radius: 20px;
+            overflow: hidden;
 
-    box-shadow:
-        0 12px 35px rgba(0, 0, 0, 0.08);
-}
+            box-shadow:
+                0 12px 35px rgba(0, 0, 0, 0.08);
+        }
 
 
-.car-image-wrapper {
-    width: 100%;
-    height: 430px;
-    background: #e9edf2;
-    overflow: hidden;
-}
+        .car-image-wrapper {
+            width: 100%;
+            height: 430px;
+            background: #e9edf2;
+            overflow: hidden;
+        }
 
 
-.car-image {
-    width: 100%;
-    height: 100%;
+        .car-image {
+            width: 100%;
+            height: 100%;
 
-    object-fit: cover;
-    display: block;
+            object-fit: cover;
+            display: block;
 
-    transition: transform 0.4s ease;
-}
+            transition: transform 0.4s ease;
+        }
 
 
-.car-card:hover .car-image {
-    transform: scale(1.03);
-}
+        .car-card:hover .car-image {
+            transform: scale(1.03);
+        }
 
 
-.car-info {
-    padding: 28px;
-}
+        .car-info {
+            padding: 28px;
+        }
 
 
-.brand {
-    color: #ef3340;
-    font-weight: bold;
-    text-transform: uppercase;
-    font-size: 14px;
-    letter-spacing: 0.5px;
-    margin-bottom: 8px;
-}
+        .brand {
+            color: #ef3340;
+            font-weight: bold;
+            text-transform: uppercase;
+            font-size: 14px;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
 
 
-.car-info h2 {
-    font-size: 30px;
-    margin-bottom: 15px;
-}
+        .car-info h2 {
+            font-size: 30px;
+            margin-bottom: 15px;
+        }
 
 
-.price {
-    color: #ef3340;
-    font-size: 28px;
-    font-weight: bold;
-}
+        .price {
+            color: #ef3340;
+            font-size: 28px;
+            font-weight: bold;
+        }
 
 
-/* =========================================================
-   FORM CARD
-   ========================================================= */
+        /* =====================================================
+           FORM CARD
+           ===================================================== */
 
-.form-card {
-    background: white;
-    border-radius: 20px;
+        .form-card {
+            background: white;
+            border-radius: 20px;
 
-    padding: 42px;
+            padding: 42px;
 
-    box-shadow:
-        0 12px 35px rgba(0, 0, 0, 0.08);
-}
+            box-shadow:
+                0 12px 35px rgba(0, 0, 0, 0.08);
+        }
 
 
-.form-card h2 {
-    font-size: 32px;
-    margin-bottom: 8px;
-}
+        .form-card h2 {
+            font-size: 32px;
+            margin-bottom: 8px;
+        }
 
 
-.subtitle {
-    color: #667085;
-    font-size: 17px;
-    margin-bottom: 30px;
-    line-height: 1.5;
-}
+        .subtitle {
+            color: #667085;
+            font-size: 17px;
+            margin-bottom: 30px;
+            line-height: 1.5;
+        }
 
 
-/* =========================================================
-   ALERTS
-   ========================================================= */
+        /* =====================================================
+           ALERTS
+           ===================================================== */
 
-.alert {
-    padding: 16px 18px;
-    border-radius: 10px;
-    margin-bottom: 25px;
-    line-height: 1.5;
-}
+        .alert {
+            padding: 16px 18px;
+            border-radius: 10px;
+            margin-bottom: 25px;
+            line-height: 1.5;
+        }
 
 
-.error {
-    background: #fff0f0;
-    border: 1px solid #ffb5b5;
-    color: #c62828;
-}
+        .error {
+            background: #fff0f0;
+            border: 1px solid #ffb5b5;
+            color: #c62828;
+        }
 
 
-.success {
-    background: #eaf8ee;
-    border: 1px solid #b7e4c7;
-    color: #18733a;
-}
+        .success {
+            background: #eaf8ee;
+            border: 1px solid #b7e4c7;
+            color: #18733a;
+        }
 
 
-/* =========================================================
-   FORM
-   ========================================================= */
+        /* =====================================================
+           FORM
+           ===================================================== */
 
-.form-group {
-    margin-bottom: 22px;
-}
+        .form-group {
+            margin-bottom: 22px;
+        }
 
 
-.form-group label {
-    display: block;
+        .form-group label {
+            display: block;
 
-    font-size: 16px;
-    font-weight: bold;
+            font-size: 16px;
+            font-weight: bold;
 
-    margin-bottom: 9px;
-}
+            margin-bottom: 9px;
+        }
 
 
-.form-group input {
-    width: 100%;
+        .form-group input {
+            width: 100%;
 
-    padding: 16px;
+            padding: 16px;
 
-    border: 1px solid #ccd2da;
-    border-radius: 10px;
+            border: 1px solid #ccd2da;
+            border-radius: 10px;
 
-    font-size: 16px;
+            font-size: 16px;
 
-    outline: none;
+            outline: none;
 
-    transition: 0.2s;
-}
+            transition: 0.2s;
+        }
 
 
-.form-group input:focus {
-    border-color: #ef3340;
+        .form-group input:focus {
+            border-color: #ef3340;
 
-    box-shadow:
-        0 0 0 3px rgba(239, 51, 64, 0.10);
-}
+            box-shadow:
+                0 0 0 3px rgba(239, 51, 64, 0.10);
+        }
 
 
-.form-group input[readonly] {
-    background: #f8f9fb;
-}
+        .form-group input[readonly] {
+            background: #f8f9fb;
+        }
 
 
-/* =========================================================
-   BUTTON
-   ========================================================= */
+        /* =====================================================
+           BUTTON
+           ===================================================== */
 
-.submit-btn {
-    width: 100%;
+        .submit-btn {
+            width: 100%;
 
-    border: none;
+            border: none;
 
-    background: #ef3340;
-    color: white;
+            background: #ef3340;
+            color: white;
 
-    padding: 17px;
+            padding: 17px;
 
-    border-radius: 10px;
+            border-radius: 10px;
 
-    font-size: 18px;
-    font-weight: bold;
+            font-size: 18px;
+            font-weight: bold;
 
-    cursor: pointer;
+            cursor: pointer;
 
-    transition: 0.2s;
-}
+            transition: 0.2s;
+        }
 
 
-.submit-btn:hover {
-    background: #d92835;
-    transform: translateY(-1px);
-}
+        .submit-btn:hover {
+            background: #d92835;
+            transform: translateY(-1px);
+        }
 
 
-/* =========================================================
-   LOGIN MESSAGE
-   ========================================================= */
+        /* =====================================================
+           LOGIN MESSAGE
+           ===================================================== */
 
-.login-note {
-    margin-top: 22px;
+        .login-note {
+            margin-top: 22px;
 
-    padding-top: 22px;
+            padding-top: 22px;
 
-    border-top: 1px solid #e5e7eb;
+            border-top: 1px solid #e5e7eb;
 
-    color: #667085;
+            color: #667085;
 
-    line-height: 1.6;
-}
+            line-height: 1.6;
+        }
 
 
-/* =========================================================
-   FOOTER
-   ========================================================= */
+        /* =====================================================
+           FOOTER
+           ===================================================== */
 
-footer {
-    background: #111111;
-    color: white;
+        footer {
+            background: #111111;
+            color: white;
 
-    text-align: center;
+            text-align: center;
 
-    padding: 30px;
+            padding: 30px;
 
-    margin-top: 70px;
-}
+            margin-top: 70px;
+        }
 
 
-/* =========================================================
-   MOBILE
-   ========================================================= */
+        /* =====================================================
+           MOBILE
+           ===================================================== */
 
-@media (max-width: 850px) {
+        @media (max-width: 850px) {
 
-    .navbar {
-        padding: 0 5%;
-    }
+            .navbar {
+                padding: 0 5%;
+            }
 
-    .nav-links {
-        display: none;
-    }
 
-    .container {
-        width: 92%;
-        margin-top: 30px;
-    }
+            .nav-links {
+                display: none;
+            }
 
-    .page-header h1 {
-        font-size: 34px;
-    }
 
-    .booking-grid {
-        grid-template-columns: 1fr;
-    }
+            .container {
+                width: 92%;
+                margin-top: 30px;
+            }
 
-    .car-image-wrapper {
-        height: 350px;
-    }
 
-    .form-card {
-        padding: 30px;
-    }
+            .page-header h1 {
+                font-size: 34px;
+            }
 
-    .car-info h2 {
-        font-size: 27px;
-    }
-}
 
-</style>
+            .booking-grid {
+                grid-template-columns: 1fr;
+            }
+
+
+            .car-image-wrapper {
+                height: 350px;
+            }
+
+
+            .form-card {
+                padding: 30px;
+            }
+
+
+            .car-info h2 {
+                font-size: 27px;
+            }
+
+        }
+
+    </style>
 
 </head>
 
@@ -863,279 +847,280 @@ footer {
 <body>
 
 
-<!-- =====================================================
-     NAVBAR
-     ===================================================== -->
+    <!-- =====================================================
+         NAVBAR
+         ===================================================== -->
 
-<nav class="navbar">
+    <nav class="navbar">
 
-    <div class="logo">
-        CAR<span>HUB</span>
-    </div>
-
-
-    <div class="nav-links">
-
-        <a href="index.php">
-            Home
-        </a>
-
-        <a href="cars.php">
-            Cars
-        </a>
-
-        <a href="about.php">
-            About
-        </a>
-
-        <a href="contact.php">
-            Contact
-        </a>
-
-        <a href="my-bookings.php">
-            My Bookings
-        </a>
-
-        <a href="logout.php">
-            Logout
-        </a>
-
-    </div>
-
-</nav>
+        <div class="logo">
+            CAR<span>HUB</span>
+        </div>
 
 
-<!-- =====================================================
-     MAIN
-     ===================================================== -->
+        <div class="nav-links">
 
-<div class="container">
+            <a href="index.php">
+                Home
+            </a>
+
+            <a href="cars.php">
+                Cars
+            </a>
+
+            <a href="about.php">
+                About
+            </a>
+
+            <a href="contact.php">
+                Contact
+            </a>
+
+            <a href="my-bookings.php">
+                My Bookings
+            </a>
+
+            <a href="logout.php">
+                Logout
+            </a>
+
+        </div>
+
+    </nav>
 
 
-    <div class="page-header">
+    <!-- =====================================================
+         MAIN
+         ===================================================== -->
 
-        <h1>
-            Book Your <span>Car</span>
-        </h1>
-
-        <p>
-            Complete the form below to submit your booking request.
-        </p>
-
-    </div>
+    <div class="container">
 
 
-    <div class="booking-grid">
+        <div class="page-header">
+
+            <h1>
+                Book Your <span>Car</span>
+            </h1>
+
+            <p>
+                Complete the form below to submit your booking request.
+            </p>
+
+        </div>
 
 
-        <!-- =================================================
-             CAR INFORMATION
-             ================================================= -->
-
-        <div class="car-card">
+        <div class="booking-grid">
 
 
-            <div class="car-image-wrapper">
+            <!-- =================================================
+                 CAR INFORMATION
+                 ================================================= -->
 
-                <img
-                    src="<?php echo htmlspecialchars($car_image); ?>"
-                    alt="<?php echo htmlspecialchars($car_name); ?>"
-                    class="car-image"
-                    onerror="this.onerror=null;this.src='https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?auto=format&fit=crop&w=1200&q=85';"
-                >
+            <div class="car-card">
+
+
+                <div class="car-image-wrapper">
+
+                    <img
+                        src="<?php echo htmlspecialchars($car_image); ?>"
+                        alt="<?php echo htmlspecialchars($car_name); ?>"
+                        class="car-image"
+                        onerror="this.onerror=null;this.src='https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?auto=format&fit=crop&w=1200&q=85';"
+                    >
+
+                </div>
+
+
+                <div class="car-info">
+
+                    <div class="brand">
+
+                        <?php
+                        echo htmlspecialchars($brand);
+                        ?>
+
+                    </div>
+
+
+                    <h2>
+
+                        <?php
+                        echo htmlspecialchars($model);
+                        ?>
+
+                    </h2>
+
+
+                    <div class="price">
+
+                        ₹<?php
+                        echo number_format((float)$price);
+                        ?>
+
+                    </div>
+
+                </div>
 
             </div>
 
 
-            <div class="car-info">
+            <!-- =================================================
+                 BOOKING FORM
+                 ================================================= -->
 
-                <div class="brand">
-
-                    <?php
-                    echo htmlspecialchars($brand);
-                    ?>
-
-                </div>
+            <div class="form-card">
 
 
                 <h2>
-
-                    <?php
-                    echo htmlspecialchars($model);
-                    ?>
-
+                    Booking Details
                 </h2>
 
 
-                <div class="price">
+                <p class="subtitle">
+                    Enter your information and preferred booking date.
+                </p>
 
-                    ₹<?php
-                    echo number_format((float)$price);
-                    ?>
+
+                <?php if ($error !== ""): ?>
+
+                    <div class="alert error">
+
+                        <?php
+                        echo htmlspecialchars($error);
+                        ?>
+
+                    </div>
+
+                <?php endif; ?>
+
+
+                <form method="POST">
+
+
+                    <!-- NAME -->
+
+                    <div class="form-group">
+
+                        <label for="name">
+                            Your Name *
+                        </label>
+
+                        <input
+                            type="text"
+                            id="name"
+                            name="name"
+                            value="<?php echo htmlspecialchars($name); ?>"
+                            placeholder="Enter your full name"
+                            required
+                        >
+
+                    </div>
+
+
+                    <!-- EMAIL -->
+
+                    <div class="form-group">
+
+                        <label for="email">
+                            Email Address *
+                        </label>
+
+                        <input
+                            type="email"
+                            id="email"
+                            name="email"
+                            value="<?php echo htmlspecialchars($email); ?>"
+                            placeholder="Enter your email address"
+                            required
+                        >
+
+                    </div>
+
+
+                    <!-- PHONE -->
+
+                    <div class="form-group">
+
+                        <label for="phone">
+                            Phone Number *
+                        </label>
+
+                        <input
+                            type="tel"
+                            id="phone"
+                            name="phone"
+                            value="<?php echo htmlspecialchars($phone); ?>"
+                            placeholder="Enter your phone number"
+                            maxlength="20"
+                            required
+                        >
+
+                    </div>
+
+
+                    <!-- DATE -->
+
+                    <div class="form-group">
+
+                        <label for="booking_date">
+                            Booking Date *
+                        </label>
+
+                        <input
+                            type="date"
+                            id="booking_date"
+                            name="booking_date"
+                            value="<?php echo htmlspecialchars($booking_date); ?>"
+                            min="<?php echo date('Y-m-d'); ?>"
+                            required
+                        >
+
+                    </div>
+
+
+                    <!-- SUBMIT -->
+
+                    <button
+                        type="submit"
+                        class="submit-btn"
+                    >
+                        Submit Booking Request
+                    </button>
+
+                </form>
+
+
+                <div class="login-note">
+
+                    <strong>
+                        Logged-in customer
+                    </strong>
+
+                    <br>
+
+                    Your booking request will be connected to your
+                    current CarHub account.
 
                 </div>
+
 
             </div>
-
-        </div>
-
-
-        <!-- =================================================
-             BOOKING FORM
-             ================================================= -->
-
-        <div class="form-card">
-
-
-            <h2>
-                Booking Details
-            </h2>
-
-
-            <p class="subtitle">
-                Enter your information and preferred booking date.
-            </p>
-
-
-            <?php if ($error !== ""): ?>
-
-                <div class="alert error">
-
-                    <?php
-                    echo htmlspecialchars($error);
-                    ?>
-
-                </div>
-
-            <?php endif; ?>
-
-
-            <form method="POST">
-
-
-                <!-- NAME -->
-
-                <div class="form-group">
-
-                    <label for="name">
-                        Your Name *
-                    </label>
-
-                    <input
-                        type="text"
-                        id="name"
-                        name="name"
-                        value="<?php echo htmlspecialchars($name); ?>"
-                        placeholder="Enter your full name"
-                        required
-                    >
-
-                </div>
-
-
-                <!-- EMAIL -->
-
-                <div class="form-group">
-
-                    <label for="email">
-                        Email Address *
-                    </label>
-
-                    <input
-                        type="email"
-                        id="email"
-                        name="email"
-                        value="<?php echo htmlspecialchars($email); ?>"
-                        placeholder="Enter your email address"
-                        required
-                    >
-
-                </div>
-
-
-                <!-- PHONE -->
-
-                <div class="form-group">
-
-                    <label for="phone">
-                        Phone Number *
-                    </label>
-
-                    <input
-                        type="tel"
-                        id="phone"
-                        name="phone"
-                        value="<?php echo htmlspecialchars($phone); ?>"
-                        placeholder="Enter your phone number"
-                        required
-                    >
-
-                </div>
-
-
-                <!-- DATE -->
-
-                <div class="form-group">
-
-                    <label for="booking_date">
-                        Booking Date *
-                    </label>
-
-                    <input
-                        type="date"
-                        id="booking_date"
-                        name="booking_date"
-                        value="<?php echo htmlspecialchars($booking_date); ?>"
-                        min="<?php echo date('Y-m-d'); ?>"
-                        required
-                    >
-
-                </div>
-
-
-                <!-- SUBMIT -->
-
-                <button
-                    type="submit"
-                    class="submit-btn"
-                >
-                    Submit Booking Request
-                </button>
-
-            </form>
-
-
-            <div class="login-note">
-
-                <strong>
-                    Logged-in customer
-                </strong>
-
-                <br>
-
-                Your booking request will be connected to your
-                current CarHub account.
-
-            </div>
-
 
         </div>
 
     </div>
 
-</div>
 
+    <!-- =====================================================
+         FOOTER
+         ===================================================== -->
 
-<!-- =====================================================
-     FOOTER
-     ===================================================== -->
+    <footer>
 
-<footer>
+        © <?php echo date('Y'); ?> CarHub.
+        All Rights Reserved.
 
-    © <?php echo date('Y'); ?> CarHub.
-    All Rights Reserved.
-
-</footer>
+    </footer>
 
 
 </body>

@@ -2,37 +2,81 @@
 
 session_start();
 
-include "config/db.php";
+require_once "config/db.php";
 
 
-/* =========================
+/* =========================================================
    CHECK LOGIN
-========================= */
+========================================================= */
 
 if (!isset($_SESSION["user_id"])) {
 
     header("Location: login.php");
-
     exit();
 
 }
 
+$user_id = (int)$_SESSION["user_id"];
 
-$user_id = $_SESSION["user_id"];
+
+/* =========================================================
+   GET LOGGED-IN USER
+========================================================= */
+
+$user_stmt = $conn->prepare("
+    SELECT id, name, email
+    FROM users
+    WHERE id = ?
+");
+
+if (!$user_stmt) {
+    die("Unable to prepare user query.");
+}
+
+$user_stmt->bind_param("i", $user_id);
+$user_stmt->execute();
+
+$user_result = $user_stmt->get_result();
+
+if ($user_result->num_rows === 0) {
+
+    $user_stmt->close();
+
+    session_destroy();
+
+    header("Location: login.php");
+    exit();
+
+}
+
+$user = $user_result->fetch_assoc();
+
+$user_name = $user["name"];
+$user_email = $user["email"];
+
+$user_stmt->close();
 
 
-/* =========================
+/* =========================================================
    GET USER TEST DRIVES
-========================= */
+========================================================= */
+
+/*
+   The test_drives table does not contain user_id.
+
+   Test drives are therefore matched using the
+   email address used when the request was submitted.
+*/
 
 $stmt = $conn->prepare("
     SELECT
         td.id,
+        td.car_id,
+        td.name,
+        td.email,
         td.phone,
         td.test_drive_date,
         td.test_drive_time,
-        td.location,
-        td.message,
         td.status,
         td.created_at,
 
@@ -41,20 +85,26 @@ $stmt = $conn->prepare("
         c.model,
         c.year,
         c.price,
-        c.image
+        c.image,
+        c.description
 
     FROM test_drives td
 
     INNER JOIN cars c
         ON td.car_id = c.id
 
-    WHERE td.user_id = ?
+    WHERE LOWER(TRIM(td.email)) = LOWER(TRIM(?))
 
     ORDER BY td.id DESC
 ");
 
 
-$stmt->bind_param("i", $user_id);
+if (!$stmt) {
+    die("Unable to prepare test drive query.");
+}
+
+
+$stmt->bind_param("s", $user_email);
 
 $stmt->execute();
 
@@ -62,593 +112,586 @@ $result = $stmt->get_result();
 
 ?>
 
+
 <!DOCTYPE html>
 
 <html lang="en">
 
 <head>
 
-    <meta charset="UTF-8">
+<meta charset="UTF-8">
 
-    <meta name="viewport"
-          content="width=device-width, initial-scale=1.0">
+<meta name="viewport"
+      content="width=device-width, initial-scale=1.0">
 
-    <title>My Test Drives - CarHub</title>
+<title>My Test Drives - CarHub</title>
 
 
-    <link rel="stylesheet"
-          href="css/style.css">
+<style>
 
+/* =========================================================
+   RESET
+========================================================= */
 
-    <style>
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
 
-        /* =========================
-           NAVIGATION
-        ========================= */
 
-        .main-nav {
+/* =========================================================
+   BODY
+========================================================= */
 
-            width: 100%;
-            min-height: 70px;
+body {
 
-            background: #222;
+    font-family: Arial, Helvetica, sans-serif;
 
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
+    background: #f5f5f5;
 
-            padding: 0 50px;
+    color: #222;
+}
 
-            box-sizing: border-box;
 
-        }
+/* =========================================================
+   NAVIGATION
+========================================================= */
 
+.main-nav {
 
-        .main-nav .logo {
+    width: 100%;
 
-            color: white;
+    min-height: 70px;
 
-            font-size: 30px;
+    background: #222;
 
-            font-weight: bold;
+    display: flex;
 
-        }
+    align-items: center;
 
+    justify-content: space-between;
 
-        .main-nav ul {
+    padding: 0 50px;
 
-            display: flex;
+    box-sizing: border-box;
+}
 
-            align-items: center;
 
-            gap: 25px;
+.main-nav .logo {
 
-            list-style: none !important;
+    color: white;
 
-            margin: 0 !important;
+    font-size: 30px;
 
-            padding: 0 !important;
+    font-weight: bold;
+}
 
-        }
 
+.main-nav .logo span {
 
-        .main-nav ul li {
+    color: #e63946;
+}
 
-            list-style: none !important;
 
-            margin: 0;
+.main-nav ul {
 
-            padding: 0;
+    display: flex;
 
-        }
+    align-items: center;
 
+    gap: 25px;
 
-        .main-nav ul li a {
+    list-style: none;
 
-            color: white !important;
+    margin: 0;
 
-            text-decoration: none !important;
+    padding: 0;
+}
 
-            font-size: 16px;
 
-        }
+.main-nav ul li {
 
+    list-style: none;
 
-        .main-nav ul li a:hover {
+    margin: 0;
 
-            color: #e63946 !important;
+    padding: 0;
+}
 
-        }
 
+.main-nav ul li a {
 
-        /* =========================
-           PAGE
-        ========================= */
+    color: white;
 
-        .my-test-drive-page {
+    text-decoration: none;
 
-            min-height: calc(100vh - 70px);
+    font-size: 16px;
 
-            background: #f5f5f5;
+    transition: 0.3s;
+}
 
-            padding: 50px 20px;
 
-        }
+.main-nav ul li a:hover {
 
+    color: #e63946;
+}
 
-        .page-container {
 
-            max-width: 1150px;
+/* =========================================================
+   PAGE
+========================================================= */
 
-            margin: auto;
+.my-test-drive-page {
 
-        }
+    min-height: calc(100vh - 70px);
 
+    background: #f5f5f5;
 
-        /* =========================
-           HEADER
-        ========================= */
+    padding: 50px 20px;
+}
 
-        .page-header {
 
-            text-align: center;
+.page-container {
 
-            margin-bottom: 40px;
+    max-width: 1150px;
 
-        }
+    margin: auto;
+}
 
 
-        .page-header h1 {
+/* =========================================================
+   HEADER
+========================================================= */
 
-            font-size: 38px;
+.page-header {
 
-            color: #222;
+    text-align: center;
 
-            margin: 0 0 10px;
+    margin-bottom: 40px;
+}
 
-        }
 
+.page-header h1 {
 
-        .page-header p {
+    font-size: 38px;
 
-            color: #777;
+    color: #222;
 
-            font-size: 16px;
+    margin: 0 0 10px;
+}
 
-            margin: 0;
 
-        }
+.page-header h1 span {
 
+    color: #e63946;
+}
 
-        /* =========================
-           TEST DRIVE CARD
-        ========================= */
 
-        .test-drive-card {
+.page-header p {
 
-            background: white;
+    color: #777;
 
-            border-radius: 16px;
+    font-size: 16px;
 
-            overflow: hidden;
+    margin: 0;
+}
 
-            margin-bottom: 25px;
 
-            box-shadow:
-                0 6px 25px rgba(0,0,0,0.10);
+/* =========================================================
+   TEST DRIVE CARD
+========================================================= */
 
-            display: grid;
+.test-drive-card {
 
-            grid-template-columns: 300px 1fr;
+    background: white;
 
-        }
+    border-radius: 16px;
 
+    overflow: hidden;
 
-        /* =========================
-           CAR IMAGE
-        ========================= */
+    margin-bottom: 25px;
 
-        .car-image {
+    box-shadow:
+        0 6px 25px rgba(0,0,0,0.10);
 
-            width: 100%;
+    display: grid;
 
-            height: 100%;
+    grid-template-columns: 300px 1fr;
+}
 
-            min-height: 280px;
 
-            object-fit: cover;
+/* =========================================================
+   CAR IMAGE
+========================================================= */
 
-        }
+.car-image {
 
+    width: 100%;
 
-        /* =========================
-           CARD CONTENT
-        ========================= */
+    height: 100%;
 
-        .card-content {
+    min-height: 280px;
 
-            padding: 30px;
+    object-fit: cover;
 
-        }
+    display: block;
+}
 
 
-        .car-brand {
+/* =========================================================
+   CARD CONTENT
+========================================================= */
 
-            color: #e63946;
+.card-content {
 
-            font-size: 13px;
+    padding: 30px;
+}
 
-            font-weight: bold;
 
-            text-transform: uppercase;
+.car-brand {
 
-            letter-spacing: 1px;
+    color: #e63946;
 
-            margin-bottom: 5px;
+    font-size: 13px;
 
-        }
+    font-weight: bold;
 
+    text-transform: uppercase;
 
-        .card-content h2 {
+    letter-spacing: 1px;
 
-            color: #222;
+    margin-bottom: 5px;
+}
 
-            font-size: 27px;
 
-            margin: 0 0 8px;
+.card-content h2 {
 
-        }
+    color: #222;
 
+    font-size: 27px;
 
-        .car-price {
+    margin: 0 0 8px;
+}
 
-            color: #e63946;
 
-            font-size: 20px;
+.car-year {
 
-            font-weight: bold;
+    color: #777;
 
-            margin-bottom: 25px;
+    font-size: 14px;
 
-        }
+    margin-bottom: 8px;
+}
 
 
-        /* =========================
-           DETAILS GRID
-        ========================= */
+.car-price {
 
-        .details-grid {
+    color: #e63946;
 
-            display: grid;
+    font-size: 20px;
 
-            grid-template-columns: 1fr 1fr;
+    font-weight: bold;
 
-            gap: 15px;
+    margin-bottom: 25px;
+}
 
-            margin-bottom: 20px;
 
-        }
+/* =========================================================
+   DETAILS GRID
+========================================================= */
 
+.details-grid {
 
-        .detail-box {
+    display: grid;
 
-            background: #f7f7f7;
+    grid-template-columns: 1fr 1fr;
 
-            border-radius: 8px;
+    gap: 15px;
 
-            padding: 14px;
+    margin-bottom: 20px;
+}
 
-        }
 
+.detail-box {
 
-        .detail-label {
+    background: #f7f7f7;
 
-            color: #777;
+    border-radius: 8px;
 
-            font-size: 12px;
+    padding: 14px;
+}
 
-            text-transform: uppercase;
 
-            margin-bottom: 6px;
+.detail-label {
 
-        }
+    color: #777;
 
+    font-size: 12px;
 
-        .detail-value {
+    text-transform: uppercase;
 
-            color: #222;
+    margin-bottom: 6px;
+}
 
-            font-size: 15px;
 
-            font-weight: bold;
+.detail-value {
 
-        }
+    color: #222;
 
+    font-size: 15px;
 
-        /* =========================
-           MESSAGE
-        ========================= */
+    font-weight: bold;
 
-        .user-message {
+    word-break: break-word;
+}
 
-            background: #fafafa;
 
-            border-left: 4px solid #e63946;
+/* =========================================================
+   STATUS
+========================================================= */
 
-            padding: 12px 15px;
+.status-row {
 
-            border-radius: 5px;
+    display: flex;
 
-            color: #555;
+    justify-content: space-between;
 
-            margin-bottom: 20px;
+    align-items: center;
 
-        }
+    flex-wrap: wrap;
 
+    gap: 10px;
 
-        /* =========================
-           STATUS
-        ========================= */
+    margin-top: 5px;
+}
 
-        .status-row {
 
-            display: flex;
+.status {
 
-            justify-content: space-between;
+    display: inline-block;
 
-            align-items: center;
+    padding: 8px 18px;
 
-            flex-wrap: wrap;
+    border-radius: 20px;
 
-            gap: 10px;
+    font-size: 13px;
 
-        }
+    font-weight: bold;
+}
 
 
-        .status {
+.status-pending {
 
-            display: inline-block;
+    background: #fff3cd;
 
-            padding: 8px 18px;
+    color: #856404;
+}
 
-            border-radius: 20px;
 
-            font-size: 13px;
+.status-approved {
 
-            font-weight: bold;
+    background: #d4edda;
 
-        }
+    color: #155724;
+}
 
 
-        .status-pending {
+.status-confirmed {
 
-            background: #fff3cd;
+    background: #d4edda;
 
-            color: #856404;
+    color: #155724;
+}
 
-        }
 
+.status-completed {
 
-        .status-approved {
+    background: #d1ecf1;
 
-            background: #d4edda;
+    color: #0c5460;
+}
 
-            color: #155724;
 
-        }
+.status-cancelled {
 
+    background: #f8d7da;
 
-        .status-completed {
+    color: #721c24;
+}
 
-            background: #d1ecf1;
 
-            color: #0c5460;
+.status-rejected {
 
-        }
+    background: #f8d7da;
 
+    color: #721c24;
+}
 
-        .status-cancelled {
 
-            background: #f8d7da;
+.status-default {
 
-            color: #721c24;
+    background: #e2e3e5;
 
-        }
+    color: #383d41;
+}
 
 
-        .status-default {
+.request-date {
 
-            background: #e2e3e5;
+    color: #888;
 
-            color: #383d41;
+    font-size: 13px;
+}
 
-        }
 
+/* =========================================================
+   EMPTY STATE
+========================================================= */
 
-        .request-date {
+.empty-box {
 
-            color: #888;
+    background: white;
 
-            font-size: 13px;
+    border-radius: 16px;
 
-        }
+    padding: 70px 30px;
 
+    text-align: center;
 
-        /* =========================
-           EMPTY STATE
-        ========================= */
+    box-shadow:
+        0 6px 25px rgba(0,0,0,0.08);
+}
 
-        .empty-box {
 
-            background: white;
+.empty-icon {
 
-            border-radius: 16px;
+    font-size: 55px;
 
-            padding: 70px 30px;
+    margin-bottom: 15px;
+}
 
-            text-align: center;
 
-            box-shadow:
-                0 6px 25px rgba(0,0,0,0.08);
+.empty-box h2 {
 
-        }
+    color: #333;
 
+    margin-bottom: 10px;
+}
 
-        .empty-icon {
 
-            font-size: 55px;
+.empty-box p {
 
-            margin-bottom: 15px;
+    color: #777;
 
-        }
+    margin-bottom: 25px;
+}
 
 
-        .empty-box h2 {
+.browse-btn {
 
-            color: #333;
+    display: inline-block;
 
-            margin-bottom: 10px;
+    background: #e63946;
 
-        }
+    color: white;
 
+    padding: 13px 25px;
 
-        .empty-box p {
+    border-radius: 8px;
 
-            color: #777;
+    text-decoration: none;
 
-            margin-bottom: 25px;
+    font-weight: bold;
 
-        }
+    transition: 0.3s;
+}
 
 
-        .browse-btn {
+.browse-btn:hover {
 
-            display: inline-block;
+    background: #c92f3c;
+}
 
-            background: #e63946;
 
-            color: white;
+/* =========================================================
+   RESPONSIVE
+========================================================= */
 
-            padding: 13px 25px;
+@media (max-width: 850px) {
 
-            border-radius: 8px;
+    .test-drive-card {
 
-            text-decoration: none;
+        grid-template-columns: 1fr;
+    }
 
-            font-weight: bold;
 
-        }
+    .car-image {
 
+        height: 280px;
 
-        .browse-btn:hover {
+        min-height: 0;
+    }
 
-            background: #c92f3c;
 
-        }
+    .main-nav {
 
+        padding: 20px;
 
-        /* =========================
-           BACK BUTTON
-        ========================= */
+        flex-direction: column;
 
-        .back-btn {
+        gap: 15px;
+    }
 
-            display: inline-block;
 
-            margin-top: 10px;
+    .main-nav ul {
 
-            color: #555;
+        flex-wrap: wrap;
 
-            text-decoration: none;
+        justify-content: center;
 
-        }
+        gap: 12px;
+    }
 
+}
 
-        .back-btn:hover {
 
-            color: #e63946;
+@media (max-width: 550px) {
 
-        }
+    .my-test-drive-page {
 
+        padding: 30px 12px;
+    }
 
-        /* =========================
-           RESPONSIVE
-        ========================= */
 
-        @media (max-width: 850px) {
+    .page-header h1 {
 
-            .test-drive-card {
+        font-size: 30px;
+    }
 
-                grid-template-columns: 1fr;
 
-            }
+    .card-content {
 
+        padding: 20px;
+    }
 
-            .car-image {
 
-                height: 250px;
+    .details-grid {
 
-                min-height: 0;
+        grid-template-columns: 1fr;
+    }
 
-            }
 
+    .status-row {
 
-            .main-nav {
+        align-items: flex-start;
 
-                padding: 20px;
+        flex-direction: column;
+    }
 
-                flex-direction: column;
+}
 
-                gap: 15px;
-
-            }
-
-
-            .main-nav ul {
-
-                flex-wrap: wrap;
-
-                justify-content: center;
-
-                gap: 12px;
-
-            }
-
-        }
-
-
-        @media (max-width: 550px) {
-
-            .my-test-drive-page {
-
-                padding: 30px 12px;
-
-            }
-
-
-            .page-header h1 {
-
-                font-size: 30px;
-
-            }
-
-
-            .card-content {
-
-                padding: 20px;
-
-            }
-
-
-            .details-grid {
-
-                grid-template-columns: 1fr;
-
-            }
-
-        }
-
-    </style>
+</style>
 
 </head>
 
@@ -656,15 +699,17 @@ $result = $stmt->get_result();
 <body>
 
 
-<!-- =========================
+<!-- =======================================================
      NAVIGATION
-========================= -->
+======================================================= -->
 
 <nav class="main-nav">
 
 
     <div class="logo">
-        CarHub
+
+        Car<span>Hub</span>
+
     </div>
 
 
@@ -705,6 +750,8 @@ $result = $stmt->get_result();
         </li>
 
 
+        <!-- NEW TEST DRIVE LINK -->
+
         <li>
             <a href="my-test-drives.php">
                 My Test Drives
@@ -724,9 +771,9 @@ $result = $stmt->get_result();
 
 
 
-<!-- =========================
+<!-- =======================================================
      MAIN PAGE
-========================= -->
+======================================================= -->
 
 <section class="my-test-drive-page">
 
@@ -739,8 +786,9 @@ $result = $stmt->get_result();
         <div class="page-header">
 
             <h1>
-                My Test Drives
+                My <span>Test Drives</span>
             </h1>
+
 
             <p>
                 View your test drive requests and their current status.
@@ -753,46 +801,195 @@ $result = $stmt->get_result();
         <?php if ($result->num_rows > 0): ?>
 
 
-            <!-- =========================
-                 DISPLAY REQUESTS
-            ========================= -->
+            <!-- =================================================
+                 DISPLAY TEST DRIVES
+            ================================================== -->
 
             <?php while ($drive = $result->fetch_assoc()): ?>
 
 
                 <?php
 
-                $status = strtolower($drive["status"]);
+                /* =============================================
+                   STATUS
+                ============================================= */
+
+                $status = strtolower(
+                    trim($drive["status"] ?? "Pending")
+                );
 
 
-                if ($status == "pending") {
+                if ($status === "pending") {
 
                     $status_class = "status-pending";
 
                 }
-                elseif ($status == "approved") {
+
+                elseif ($status === "approved") {
 
                     $status_class = "status-approved";
 
                 }
-                elseif ($status == "completed") {
+
+                elseif ($status === "confirmed") {
+
+                    $status_class = "status-confirmed";
+
+                }
+
+                elseif ($status === "completed") {
 
                     $status_class = "status-completed";
 
                 }
-                elseif ($status == "cancelled") {
+
+                elseif ($status === "cancelled") {
 
                     $status_class = "status-cancelled";
 
                 }
+
+                elseif ($status === "rejected") {
+
+                    $status_class = "status-rejected";
+
+                }
+
                 else {
 
                     $status_class = "status-default";
 
                 }
 
+
+                /* =============================================
+                   CAR IMAGE
+                ============================================= */
+
+                $image = "";
+
+                if (!empty($drive["image"])) {
+
+                    $db_image = trim($drive["image"]);
+
+
+                    if (
+                        filter_var(
+                            $db_image,
+                            FILTER_VALIDATE_URL
+                        )
+                    ) {
+
+                        $image = $db_image;
+
+                    }
+
+                    else {
+
+                        $clean_path =
+                            ltrim($db_image, "/\\");
+
+
+                        if (
+                            file_exists(
+                                __DIR__ .
+                                DIRECTORY_SEPARATOR .
+                                $clean_path
+                            )
+                        ) {
+
+                            $image = $clean_path;
+
+                        }
+
+                    }
+
+                }
+
+
+                /* =============================================
+                   FALLBACK IMAGE
+                ============================================= */
+
+                if ($image === "") {
+
+                    $brand_lower =
+                        strtolower(
+                            $drive["brand"] ?? ""
+                        );
+
+
+                    if (
+                        strpos(
+                            $brand_lower,
+                            "mercedes"
+                        ) !== false
+                    ) {
+
+                        $image =
+                            "https://images.unsplash.com/photo-1618843479313-40f8afb4b4d8?auto=format&fit=crop&w=1200&q=85";
+
+                    }
+
+                    elseif (
+                        strpos(
+                            $brand_lower,
+                            "audi"
+                        ) !== false
+                    ) {
+
+                        $image =
+                            "https://images.unsplash.com/photo-1606664515524-ed2f786a0bd6?auto=format&fit=crop&w=1200&q=85";
+
+                    }
+
+                    elseif (
+                        strpos(
+                            $brand_lower,
+                            "bmw"
+                        ) !== false
+                    ) {
+
+                        $image =
+                            "https://images.unsplash.com/photo-1555215695-3004980ad54e?auto=format&fit=crop&w=1200&q=85";
+
+                    }
+
+                    else {
+
+                        $image =
+                            "https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?auto=format&fit=crop&w=1200&q=85";
+
+                    }
+
+                }
+
+
+                /* =============================================
+                   CAR NAME
+                ============================================= */
+
+                $car_display_name =
+                    trim(
+                        ($drive["brand"] ?? "") .
+                        " " .
+                        ($drive["model"] ?? "")
+                    );
+
+
+                if ($car_display_name === "") {
+
+                    $car_display_name =
+                        $drive["car_name"] ?? "Car";
+
+                }
+
                 ?>
 
+
+                <!-- =================================================
+                     TEST DRIVE CARD
+                ================================================== -->
 
                 <div class="test-drive-card">
 
@@ -803,12 +1000,16 @@ $result = $stmt->get_result();
                         class="car-image"
 
                         src="<?php
-                        echo htmlspecialchars($drive["image"]);
+                        echo htmlspecialchars($image);
                         ?>"
 
                         alt="<?php
-                        echo htmlspecialchars($drive["car_name"]);
+                        echo htmlspecialchars(
+                            $car_display_name
+                        );
                         ?>"
+
+                        onerror="this.onerror=null; this.src='https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?auto=format&fit=crop&w=1200&q=85';"
                     >
 
 
@@ -821,7 +1022,11 @@ $result = $stmt->get_result();
                         <div class="car-brand">
 
                             <?php
-                            echo htmlspecialchars($drive["brand"]);
+
+                            echo htmlspecialchars(
+                                $drive["brand"] ?? "Car"
+                            );
+
                             ?>
 
                         </div>
@@ -830,42 +1035,72 @@ $result = $stmt->get_result();
                         <h2>
 
                             <?php
-                            echo htmlspecialchars($drive["car_name"]);
+
+                            echo htmlspecialchars(
+                                $car_display_name
+                            );
+
                             ?>
 
                         </h2>
 
 
+                        <?php if (!empty($drive["year"])): ?>
+
+                            <div class="car-year">
+
+                                Model Year:
+                                <?php
+
+                                echo htmlspecialchars(
+                                    $drive["year"]
+                                );
+
+                                ?>
+
+                            </div>
+
+                        <?php endif; ?>
+
+
                         <div class="car-price">
 
                             ₹ <?php
-                            echo number_format($drive["price"]);
+
+                            echo number_format(
+                                (float)(
+                                    $drive["price"] ?? 0
+                                )
+                            );
+
                             ?>
 
                         </div>
 
 
 
-                        <!-- DETAILS -->
+                        <!-- =================================================
+                             DETAILS
+                        ================================================== -->
 
                         <div class="details-grid">
 
 
+                            <!-- TEST DRIVE ID -->
+
                             <div class="detail-box">
 
                                 <div class="detail-label">
-                                    Test Drive Date
+                                    Test Drive ID
                                 </div>
+
 
                                 <div class="detail-value">
 
-                                    <?php
+                                    #<?php
 
-                                    echo date(
-                                        "d M Y",
-                                        strtotime(
-                                            $drive["test_drive_date"]
-                                        )
+                                    echo htmlspecialchars(
+                                        $drive["id"]
                                     );
 
                                     ?>
@@ -876,43 +1111,21 @@ $result = $stmt->get_result();
 
 
 
-                            <div class="detail-box">
-
-                                <div class="detail-label">
-                                    Preferred Time
-                                </div>
-
-                                <div class="detail-value">
-
-                                    <?php
-
-                                    echo date(
-                                        "h:i A",
-                                        strtotime(
-                                            $drive["test_drive_time"]
-                                        )
-                                    );
-
-                                    ?>
-
-                                </div>
-
-                            </div>
-
-
+                            <!-- CUSTOMER NAME -->
 
                             <div class="detail-box">
 
                                 <div class="detail-label">
-                                    Location
+                                    Customer Name
                                 </div>
+
 
                                 <div class="detail-value">
 
                                     <?php
 
                                     echo htmlspecialchars(
-                                        $drive["location"]
+                                        $drive["name"]
                                     );
 
                                     ?>
@@ -923,11 +1136,39 @@ $result = $stmt->get_result();
 
 
 
+                            <!-- EMAIL -->
+
+                            <div class="detail-box">
+
+                                <div class="detail-label">
+                                    Email
+                                </div>
+
+
+                                <div class="detail-value">
+
+                                    <?php
+
+                                    echo htmlspecialchars(
+                                        $drive["email"]
+                                    );
+
+                                    ?>
+
+                                </div>
+
+                            </div>
+
+
+
+                            <!-- PHONE -->
+
                             <div class="detail-box">
 
                                 <div class="detail-label">
                                     Phone
                                 </div>
+
 
                                 <div class="detail-value">
 
@@ -944,50 +1185,117 @@ $result = $stmt->get_result();
                             </div>
 
 
+
+                            <!-- DATE -->
+
+                            <div class="detail-box">
+
+                                <div class="detail-label">
+                                    Test Drive Date
+                                </div>
+
+
+                                <div class="detail-value">
+
+                                    <?php
+
+                                    if (
+                                        !empty(
+                                            $drive[
+                                                "test_drive_date"
+                                            ]
+                                        )
+                                    ) {
+
+                                        echo date(
+                                            "d M Y",
+                                            strtotime(
+                                                $drive[
+                                                    "test_drive_date"
+                                                ]
+                                            )
+                                        );
+
+                                    } else {
+
+                                        echo "Not specified";
+
+                                    }
+
+                                    ?>
+
+                                </div>
+
+                            </div>
+
+
+
+                            <!-- TIME -->
+
+                            <div class="detail-box">
+
+                                <div class="detail-label">
+                                    Preferred Time
+                                </div>
+
+
+                                <div class="detail-value">
+
+                                    <?php
+
+                                    if (
+                                        !empty(
+                                            $drive[
+                                                "test_drive_time"
+                                            ]
+                                        )
+                                    ) {
+
+                                        echo date(
+                                            "h:i A",
+                                            strtotime(
+                                                $drive[
+                                                    "test_drive_time"
+                                                ]
+                                            )
+                                        );
+
+                                    } else {
+
+                                        echo "Not specified";
+
+                                    }
+
+                                    ?>
+
+                                </div>
+
+                            </div>
+
+
                         </div>
 
 
 
-                        <!-- MESSAGE -->
-
-                        <?php if (!empty($drive["message"])): ?>
-
-                            <div class="user-message">
-
-                                <strong>
-                                    Your Message:
-                                </strong>
-
-                                <br>
-
-                                <?php
-
-                                echo htmlspecialchars(
-                                    $drive["message"]
-                                );
-
-                                ?>
-
-                            </div>
-
-                        <?php endif; ?>
-
-
-
-                        <!-- STATUS -->
+                        <!-- =================================================
+                             STATUS
+                        ================================================== -->
 
                         <div class="status-row">
 
 
                             <span
-                                class="status
-                                <?php echo $status_class; ?>"
+                                class="status <?php
+                                echo $status_class;
+                                ?>"
                             >
 
                                 <?php
 
                                 echo htmlspecialchars(
-                                    $drive["status"]
+                                    ucfirst(
+                                        $drive["status"]
+                                    )
                                 );
 
                                 ?>
@@ -1001,12 +1309,24 @@ $result = $stmt->get_result();
 
                                 <?php
 
-                                echo date(
-                                    "d M Y",
-                                    strtotime(
+                                if (
+                                    !empty(
                                         $drive["created_at"]
                                     )
-                                );
+                                ) {
+
+                                    echo date(
+                                        "d M Y",
+                                        strtotime(
+                                            $drive["created_at"]
+                                        )
+                                    );
+
+                                } else {
+
+                                    echo "N/A";
+
+                                }
 
                                 ?>
 
@@ -1027,9 +1347,9 @@ $result = $stmt->get_result();
         <?php else: ?>
 
 
-            <!-- =========================
-                 NO TEST DRIVES
-            ========================= -->
+            <!-- =================================================
+                 EMPTY STATE
+            ================================================== -->
 
             <div class="empty-box">
 
@@ -1045,8 +1365,10 @@ $result = $stmt->get_result();
 
 
                 <p>
+
                     You haven't requested a test drive yet.
                     Explore our cars and book your first test drive.
+
                 </p>
 
 
@@ -1060,6 +1382,7 @@ $result = $stmt->get_result();
 
             </div>
 
+
         <?php endif; ?>
 
 
@@ -1071,3 +1394,12 @@ $result = $stmt->get_result();
 </body>
 
 </html>
+
+
+<?php
+
+$stmt->close();
+
+$conn->close();
+
+?>
