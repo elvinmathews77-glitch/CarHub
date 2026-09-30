@@ -5,3 +5,4 @@ RUN install-php-extensions mysqli
 WORKDIR /app
 
 COPY . /app
+COPY Caddyfile /etc/frankenphp/Caddyfile
