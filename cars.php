@@ -1,3 +1,4 @@
+
 <?php
 require_once __DIR__ . '/config/db.php';
 
@@ -6,7 +7,7 @@ require_once __DIR__ . '/config/db.php';
 | CarHub Cars Listing
 |--------------------------------------------------------------------------
 | Image directory: images/cars/
-| Images currently use .avif extensions.
+| Existing image filenames are preserved.
 */
 
 function e($value)
@@ -25,9 +26,39 @@ function getCarValue($car, $fields, $default = '')
     return $default;
 }
 
+/**
+ * Format numbers using Indian comma grouping.
+ * Example: 1000000 becomes 10,00,000.
+ */
+function formatIndianPrice($price)
+{
+    if ($price === '' || !is_numeric($price)) {
+        return 'Price on request';
+    }
+
+    $amount = (int) round((float) $price);
+    $negative = $amount < 0;
+    $digits = (string) abs($amount);
+
+    if (strlen($digits) <= 3) {
+        return ($negative ? '-' : '') . $digits;
+    }
+
+    $lastThree = substr($digits, -3);
+    $remaining = substr($digits, 0, -3);
+
+    $remaining = preg_replace(
+        '/\B(?=(\d{2})+(?!\d))/',
+        ',',
+        $remaining
+    );
+
+    return ($negative ? '-' : '') . $remaining . ',' . $lastThree;
+}
+
 /*
 |--------------------------------------------------------------------------
-| Match each vehicle to an existing image
+| Match each vehicle to its existing image
 |--------------------------------------------------------------------------
 */
 
@@ -39,6 +70,7 @@ function getCarImage($car)
 
     $search = $brand . ' ' . $model . ' ' . $name;
 
+    // Keep the original image filenames.
     $imageMap = [
         'bmw'      => 'bmw-3-series.jpg.avif',
         'audi'     => 'audi-a4.avif',
@@ -52,21 +84,33 @@ function getCarImage($car)
         'e-class'  => 'mercedes-e-class.jpg.avif'
     ];
 
-    // Use specific model matches before general brand matches.
+    // Match specific models before general brands.
     $keywords = [
-        'fortuner', 'velar', 'c-class', 'e-class',
-        'gle', 'swift', 'i20', 'lexus', 'audi', 'bmw'
+        'fortuner',
+        'velar',
+        'c-class',
+        'e-class',
+        'gle',
+        'swift',
+        'i20',
+        'lexus',
+        'audi',
+        'bmw'
     ];
 
     foreach ($keywords as $keyword) {
-        if (strpos($search, $keyword) !== false &&
-            isset($imageMap[$keyword])) {
-
+        if (
+            strpos($search, $keyword) !== false &&
+            isset($imageMap[$keyword])
+        ) {
             $filename = $imageMap[$keyword];
             $fullPath = __DIR__ . '/images/cars/' . $filename;
 
             if (is_file($fullPath)) {
-                return 'images/cars/' . rawurlencode($filename);
+                return 'images/cars/' . implode(
+                    '/',
+                    array_map('rawurlencode', explode('/', $filename))
+                );
             }
         }
     }
@@ -76,7 +120,7 @@ function getCarImage($car)
 
 /*
 |--------------------------------------------------------------------------
-| Load cars from database
+| Load cars from the database
 |--------------------------------------------------------------------------
 */
 
@@ -84,7 +128,9 @@ $cars = [];
 $errorMessage = '';
 
 try {
-    $result = $conn->query("SELECT * FROM cars ORDER BY id ASC LIMIT 10");
+    $result = $conn->query(
+        "SELECT * FROM cars ORDER BY id ASC LIMIT 10"
+    );
 
     if ($result) {
         while ($row = $result->fetch_assoc()) {
@@ -226,17 +272,18 @@ try {
         .car-image {
             width: 100%;
             height: 240px;
-            background: #e5e7eb;
+            background: #fff;
             display: flex;
             align-items: center;
             justify-content: center;
             overflow: hidden;
         }
 
+        /* Show the complete image without cropping. */
         .car-image img {
             width: 100%;
             height: 100%;
-            object-fit: cover;
+            object-fit: contain;
             display: block;
         }
 
@@ -385,7 +432,7 @@ try {
     <div class="section-heading">
         <h2>Available Cars</h2>
         <span class="car-count">
-            <?php echo count($cars); ?> cars displayed
+            <?= count($cars); ?> cars displayed
         </span>
     </div>
 
@@ -394,7 +441,7 @@ try {
         <?php if ($errorMessage !== ''): ?>
 
             <div class="error-state">
-                <?php echo e($errorMessage); ?>
+                <?= e($errorMessage); ?>
             </div>
 
         <?php elseif (empty($cars)): ?>
@@ -418,7 +465,20 @@ try {
                 $transmission = getCarValue($car, ['transmission'], '');
                 $mileage = getCarValue($car, ['mileage'], '');
                 $image = getCarImage($car);
+
                 $displayName = trim($brand . ' ' . $model);
+
+                /*
+                 * Only override the Hyundai i20 listing price.
+                 * All other vehicles retain their database prices.
+                 */
+                $isHyundaiI20 =
+                    stripos((string)$brand, 'Hyundai') !== false &&
+                    stripos((string)$model, 'i20') !== false;
+
+                if ($isHyundaiI20) {
+                    $price = 1000000;
+                }
                 ?>
 
                 <article class="car-card">
@@ -428,10 +488,10 @@ try {
                         <?php if ($image !== ''): ?>
 
                             <img
-                                src="<?php echo e($image); ?>"
-                                alt="<?php echo e($displayName); ?>"
+                                src="<?= e($image); ?>"
+                                alt="<?= e($displayName); ?>"
                                 loading="lazy"
-                                onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"
+                                onerror="this.onerror=null;this.style.display='none';this.nextElementSibling.style.display='block';"
                             >
 
                             <div
@@ -454,36 +514,36 @@ try {
                     <div class="car-content">
 
                         <h3 class="car-title">
-                            <?php echo e($displayName); ?>
+                            <?= e($displayName); ?>
                         </h3>
 
                         <?php if ($year !== ''): ?>
                             <p class="car-brand">
-                                Model year: <?php echo e($year); ?>
+                                Model year: <?= e($year); ?>
                             </p>
                         <?php endif; ?>
 
                         <div class="car-price">
-                            <?php
-                            echo ($price !== '' && is_numeric($price))
-                                ? '₹' . number_format((float)$price)
-                                : 'Price on request';
-                            ?>
+                            <?php if ($price !== '' && is_numeric($price)): ?>
+                                ₹<?= e(formatIndianPrice($price)); ?>
+                            <?php else: ?>
+                                Price on request
+                            <?php endif; ?>
                         </div>
 
                         <div class="car-specs">
 
                             <?php if ($fuel !== ''): ?>
-                                <span class="spec"><?php echo e($fuel); ?></span>
+                                <span class="spec"><?= e($fuel); ?></span>
                             <?php endif; ?>
 
                             <?php if ($transmission !== ''): ?>
-                                <span class="spec"><?php echo e($transmission); ?></span>
+                                <span class="spec"><?= e($transmission); ?></span>
                             <?php endif; ?>
 
                             <?php if ($mileage !== ''): ?>
                                 <span class="spec">
-                                    <?php echo e($mileage); ?> km/l
+                                    <?= e($mileage); ?> km/l
                                 </span>
                             <?php endif; ?>
 
@@ -491,7 +551,7 @@ try {
 
                         <a
                             class="details-btn"
-                            href="car-details.php?id=<?php echo $id; ?>"
+                            href="car-details.php?id=<?= $id; ?>"
                         >
                             View Details
                         </a>
@@ -507,9 +567,8 @@ try {
 </main>
 
 <footer>
-    <p>&copy; <?php echo date('Y'); ?> CarHub. All rights reserved.</p>
+    <p>&copy; <?= date('Y'); ?> CarHub. All rights reserved.</p>
 </footer>
 
 </body>
 </html>
-```
