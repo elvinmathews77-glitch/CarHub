@@ -5,7 +5,6 @@ if (session_status() === PHP_SESSION_NONE) {
 }
 
 require_once __DIR__ . '/config/db.php';
-
 // Validate car ID
 $car_id = filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT);
 
