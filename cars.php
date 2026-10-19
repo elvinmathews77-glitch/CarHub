@@ -1,3 +1,5 @@
+Save this as `cars.php`:
+
 ```php
 <?php
 session_start();
@@ -5,7 +7,6 @@ require_once "config/db.php";
 
 $cars = [];
 
-// Fetch cars from the database
 $sql = "SELECT * FROM cars ORDER BY id DESC";
 $result = $conn->query($sql);
 
@@ -15,65 +16,13 @@ if ($result) {
     }
 }
 
-/**
- * Return a usable database image path or URL.
- */
-function getCarImage($car)
-{
-    $image = trim((string)($car['image'] ?? ''));
-
-    // Accept valid HTTP/HTTPS URLs
-    if (
-        $image !== '' &&
-        filter_var($image, FILTER_VALIDATE_URL) &&
-        in_array(
-            strtolower((string)parse_url($image, PHP_URL_SCHEME)),
-            ['http', 'https'],
-            true
-        )
-    ) {
-        return $image;
-    }
-
-    // Accept local relative image paths
-    if (
-        $image !== '' &&
-        !preg_match('/^[a-z][a-z0-9+.-]*:/i', $image) &&
-        !str_starts_with($image, '//') &&
-        !str_contains($image, '..')
-    ) {
-        return $image;
-    }
-
-    return '';
-}
-
-/**
- * Brand-specific fallback image.
- * The database image is always tried first.
- */
-function getFallbackImage($name, $brand)
-{
-    $text = strtolower($name . ' ' . $brand);
-
-    if (strpos($text, 'audi') !== false) {
-        return 'https://images.unsplash.com/photo-1606664515524-ed2f786a0bd6?auto=format&fit=crop&w=900&q=80';
-    }
-
-    if (strpos($text, 'mercedes') !== false) {
-        return 'https://images.unsplash.com/photo-1618843479313-40f8afb4b4d8?auto=format&fit=crop&w=900&q=80';
-    }
-
-    if (strpos($text, 'bmw') !== false) {
-        return 'https://images.unsplash.com/photo-1555215695-3004980ad54e?auto=format&fit=crop&w=900&q=80';
-    }
-
-    return '';
-}
-
 function e($value)
 {
-    return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
+    return htmlspecialchars(
+        (string)($value ?? ''),
+        ENT_QUOTES,
+        'UTF-8'
+    );
 }
 ?>
 <!DOCTYPE html>
@@ -199,7 +148,9 @@ function e($value)
             align-items: center;
             justify-content: center;
             color: #64748b;
-            font-size: 18px;
+            font-size: 16px;
+            text-align: center;
+            padding: 15px;
             background: #e5e7eb;
         }
 
@@ -354,7 +305,8 @@ function e($value)
                 <?php
                 $id = (int)($car['id'] ?? 0);
                 $name = trim((string)($car['name'] ?? 'Car'));
-                $brand = trim((string)($car['brand'] ?? 'Car'));
+                $brand = trim((string)($car['brand'] ?? ''));
+                $model = trim((string)($car['model'] ?? $name));
 
                 $year = $car['year'] ?? 'N/A';
                 $fuel = $car['fuel'] ?? 'N/A';
@@ -362,37 +314,54 @@ function e($value)
                 $mileage = $car['mileage'] ?? 'N/A';
                 $price = (float)($car['price'] ?? 0);
 
-                $image = getCarImage($car);
-                $fallbackImage = getFallbackImage($name, $brand);
+                // Use a saved online URL if available.
+                $savedImage = trim((string)($car['image'] ?? ''));
+
+                $isHttpUrl = filter_var(
+                    $savedImage,
+                    FILTER_VALIDATE_URL
+                ) && in_array(
+                    strtolower((string)parse_url(
+                        $savedImage,
+                        PHP_URL_SCHEME
+                    )),
+                    ['http', 'https'],
+                    true
+                );
+
+                // Only direct HTTP/HTTPS URLs are used from the database.
+                $imageUrl = $isHttpUrl ? $savedImage : '';
                 ?>
 
                 <div class="car-card">
 
                     <div class="car-image">
 
-                        <?php if ($image !== ''): ?>
+                        <?php if ($imageUrl !== ''): ?>
 
                             <img
-                                src="<?= e($image) ?>"
+                                src="<?= e($imageUrl) ?>"
                                 alt="<?= e($name) ?>"
                                 loading="lazy"
-                                onerror="handleImageError(this)"
-                                data-fallback="<?= e($fallbackImage) ?>"
-                            >
-
-                        <?php elseif ($fallbackImage !== ''): ?>
-
-                            <img
-                                src="<?= e($fallbackImage) ?>"
-                                alt="<?= e($name) ?>"
-                                loading="lazy"
-                                onerror="handleImageError(this)"
-                                data-fallback=""
+                                onerror="showPlaceholder(this)"
                             >
 
                         <?php else: ?>
 
-                            <div class="image-placeholder">Car Image Unavailable</div>
+                            <img
+                                class="online-car-image"
+                                src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs="
+                                data-brand="<?= e($brand) ?>"
+                                data-model="<?= e($model) ?>"
+                                data-name="<?= e($name) ?>"
+                                alt="<?= e($name) ?>"
+                                loading="lazy"
+                                onerror="showPlaceholder(this)"
+                            >
+
+                            <div class="image-placeholder">
+                                Searching online for <?= e($name) ?>...
+                            </div>
 
                         <?php endif; ?>
 
@@ -446,25 +415,157 @@ function e($value)
 </footer>
 
 <script>
-function handleImageError(img) {
-    const fallback = img.dataset.fallback || '';
+function showPlaceholder(img) {
+    const container = img.closest('.car-image');
+    if (!container) return;
 
-    // If the database image fails, try the fallback image once.
-    if (fallback && img.src !== fallback) {
-        img.dataset.fallback = '';
-        img.src = fallback;
+    img.style.display = 'none';
+
+    let placeholder = container.querySelector('.image-placeholder');
+
+    if (!placeholder) {
+        placeholder = document.createElement('div');
+        placeholder.className = 'image-placeholder';
+        container.appendChild(placeholder);
+    }
+
+    placeholder.textContent =
+        'Image unavailable for ' + (img.dataset.name || img.alt);
+    placeholder.style.display = 'flex';
+}
+
+async function findOnlineCarImage(img) {
+    const brand = img.dataset.brand || '';
+    const model = img.dataset.model || img.dataset.name || '';
+
+    const container = img.closest('.car-image');
+    const placeholder = container
+        ? container.querySelector('.image-placeholder')
+        : null;
+
+    // Avoid searching if there is no model name.
+    if (!model.trim()) {
+        showPlaceholder(img);
         return;
     }
 
-    // If both images fail, show a clear placeholder.
-    const placeholder = document.createElement('div');
-    placeholder.className = 'image-placeholder';
-    placeholder.textContent = 'Car Image Unavailable';
+    const searchTerms = [
+        '"' + brand + ' ' + model + '" car',
+        brand + ' ' + model + ' automobile'
+    ];
 
-    img.replaceWith(placeholder);
+    try {
+        let pages = [];
+
+        for (const searchTerm of searchTerms) {
+            const params = new URLSearchParams({
+                action: 'query',
+                generator: 'search',
+                gsrsearch: searchTerm,
+                gsrnamespace: '6',
+                gsrlimit: '10',
+                prop: 'imageinfo',
+                iiprop: 'url|mime',
+                iiurlwidth: '900',
+                format: 'json',
+                origin: '*'
+            });
+
+            const response = await fetch(
+                'https://commons.wikimedia.org/w/api.php?' +
+                params.toString()
+            );
+
+            if (!response.ok) {
+                throw new Error('Online image search failed');
+            }
+
+            const data = await response.json();
+            pages = Object.values(data.query?.pages || {});
+
+            if (pages.length > 0) break;
+        }
+
+        // Prefer image filenames containing the brand/model terms.
+        const normalize = value => value
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, ' ')
+            .trim();
+
+        const expected = normalize(brand + ' ' + model)
+            .split(' ')
+            .filter(Boolean);
+
+        const candidates = pages
+            .map(page => {
+                const info = page.imageinfo?.[0];
+                if (!info?.thumburl) return null;
+
+                const title = normalize(
+                    page.title.replace(/^File:/i, '')
+                );
+
+                const mime = (info.mime || '').toLowerCase();
+
+                if (!mime.startsWith('image/')) return null;
+                if (mime === 'image/svg+xml') return null;
+
+                const matchedTerms = expected.filter(term =>
+                    title.includes(term)
+                ).length;
+
+                return {
+                    url: info.thumburl,
+                    title: page.title,
+                    score: matchedTerms
+                };
+            })
+            .filter(Boolean)
+            .sort((a, b) => b.score - a.score);
+
+        // Avoid using a result when it doesn't match the model at all.
+        const best = candidates.find(item =>
+            item.score >= Math.min(2, expected.length)
+        );
+
+        if (!best) {
+            showPlaceholder(img);
+            return;
+        }
+
+        img.onload = () => {
+            if (placeholder) placeholder.style.display = 'none';
+            img.style.display = 'block';
+        };
+
+        img.onerror = () => showPlaceholder(img);
+        img.src = best.url;
+
+        // Log the source page so the image can be checked for accuracy
+        // and licensing before production use.
+        console.info(
+            'Car image result:',
+            brand,
+            model,
+            'Source:',
+            'https://commons.wikimedia.org/wiki/' +
+            encodeURIComponent(best.title.replace(/ /g, '_'))
+        );
+
+    } catch (error) {
+        console.error('Image search failed for ' + model, error);
+        showPlaceholder(img);
+    }
 }
+
+document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('.online-car-image').forEach(img => {
+        findOnlineCarImage(img);
+    });
+});
 </script>
 
 </body>
 </html>
 ```
+
