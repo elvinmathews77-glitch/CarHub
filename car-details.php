@@ -1,12 +1,9 @@
-
 <?php
-// Start output buffering before anything is sent to the browser.
-ob_start();
-
-// Start the session before including any other files.
-if (session_status() === PHP_SESSION_NONE) {
+if (session_status() !== PHP_SESSION_ACTIVE) {
     session_start();
 }
+
+require_once __DIR__ . '/config/db.php';
 
 // Connect to the CarHub database.
 require_once __DIR__ . '/config/db.php';
