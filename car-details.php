@@ -1,168 +1,147 @@
 
 <?php
+// Start output buffering before anything is sent to the browser.
 ob_start();
 
+// Start the session before including any other files.
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
+// Connect to the CarHub database.
 require_once __DIR__ . '/config/db.php';
-// Validate car ID
-$car_id = filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT);
 
-if (!$car_id || $car_id < 1) {
-    http_response_code(400);
-    exit('Invalid car ID. <a href="cars.php">Back to Cars</a>');
-}
-
-// Check database connection
-if (!isset($conn) || !($conn instanceof mysqli)) {
-    error_log('CarHub: Database connection is unavailable.');
-    http_response_code(500);
-    exit('Unable to connect to the database.');
-}
-
-// Fetch car details
-$stmt = $conn->prepare('SELECT * FROM cars WHERE id = ?');
-
-if (!$stmt) {
-    error_log('CarHub query error: ' . $conn->error);
-    http_response_code(500);
-    exit('Unable to load vehicle details.');
-}
-
-$stmt->bind_param('i', $car_id);
-
-if (!$stmt->execute()) {
-    error_log('CarHub execution error: ' . $stmt->error);
-    $stmt->close();
-    http_response_code(500);
-    exit('Unable to load vehicle details.');
-}
-
-$result = $stmt->get_result();
-$car = $result->fetch_assoc();
-$stmt->close();
-
-if (!$car) {
-    http_response_code(404);
-    exit('Vehicle not found. <a href="cars.php">Back to Cars</a>');
-}
-
-// Vehicle information
-$brand = $car['brand'] ?? '';
-$model = $car['model'] ?? ($car['name'] ?? 'Vehicle');
-$price = (float) ($car['price'] ?? 0);
-$year = $car['year'] ?? 'N/A';
-$fuel = $car['fuel'] ?? ($car['fuel_type'] ?? 'N/A');
-$transmission = $car['transmission'] ?? 'N/A';
-$mileage = $car['mileage'] ?? 'N/A';
-
-$description = $car['description']
-    ?? 'Contact CarHub for more information about this vehicle.';
-
-$displayName = trim($brand . ' ' . $model);
-
-if ($displayName === '') {
-    $displayName = $car['name'] ?? 'Vehicle';
-}
-
-// Escape HTML output
-function h($value)
+// Escape output to prevent HTML injection.
+function e($value): string
 {
-    return htmlspecialchars(
-        (string) $value,
-        ENT_QUOTES,
-        'UTF-8'
-    );
+    return htmlspecialchars((string)($value ?? ''), ENT_QUOTES, 'UTF-8');
 }
 
-/*
- * Indian number formatting:
- * 100000  => 1,00,000
- * 1000000 => 10,00,000
- * 10000000 => 1,00,00,000
- */
-function number_format_indian($amount)
+// Format prices in Indian numbering format.
+function formatIndianPrice($amount): string
 {
     $amount = (int) round((float) $amount);
-    $negative = $amount < 0;
-    $digits = (string) abs($amount);
 
-    if (strlen($digits) <= 3) {
-        return ($negative ? '-' : '') . $digits;
+    if ($amount < 0) {
+        return '₹' . number_format($amount);
     }
 
-    $lastThree = substr($digits, -3);
-    $remaining = substr($digits, 0, -3);
+    $number = (string) $amount;
 
-    $remaining = preg_replace(
-        '/\B(?=(\d{2})+(?!\d))/',
-        ',',
-        $remaining
-    );
+    if (strlen($number) <= 3) {
+        return '₹' . $number;
+    }
 
-    return ($negative ? '-' : '')
-        . $remaining . ',' . $lastThree;
+    $lastThree = substr($number, -3);
+    $remaining = substr($number, 0, -3);
+    $remaining = preg_replace('/\B(?=(\d{2})+(?!\d))/', ',', $remaining);
+
+    return '₹' . $remaining . ',' . $lastThree;
 }
 
-// Map car names to existing image filenames
-$searchName = strtolower(trim($brand . ' ' . $model));
+// Get the car ID from the URL.
+$carId = filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT);
 
-$imageMap = [
-    'bmw 3 series' => 'bmw-3-series.jpg.avif',
-    'audi a4' => 'audi-a4.avif',
-    'maruti swift' => 'maruti-swift.jpg.avif',
-    'maruti suzuki swift' => 'maruti-swift.jpg.avif',
-    'hyundai i20' => 'hyundai-i20.jpg.avif',
-    'lexus es' => 'lexus-es.avif',
-    'mercedes c-class' => 'mercedes-c-class.jpg.avif',
-    'mercedes-benz c-class' => 'mercedes-c-class.jpg.avif',
-    'mercedes e-class' => 'mercedes-e-class.jpg.avif',
-    'mercedes-benz e-class' => 'mercedes-e-class.jpg.avif',
-    'mercedes gle' => 'mercedes-gle.jpg.avif',
-    'mercedes-benz gle' => 'mercedes-gle.jpg.avif',
-    'range rover velar' => 'range-rover-velar.jpg.avif',
-    'land rover range rover velar' => 'range-rover-velar.jpg.avif',
-    'toyota fortuner' => 'toyota-fortuner.jpg.avif'
-];
-
-$imageFile = null;
-
-if (isset($imageMap[$searchName])) {
-    $imageFile = $imageMap[$searchName];
+if (!$carId || $carId < 1) {
+    http_response_code(400);
+    $pageError = 'Invalid car ID. Please select a car from the listings.';
+    $car = null;
 } else {
-    foreach ($imageMap as $vehicle => $filename) {
-        if (strpos($searchName, $vehicle) !== false) {
-            $imageFile = $filename;
+    $pageError = '';
+    $car = null;
+
+    if (!isset($conn) || !($conn instanceof mysqli)) {
+        error_log('CarHub: Database connection variable $conn is unavailable.');
+        http_response_code(500);
+        $pageError = 'Unable to connect to the database. Please try again later.';
+    } else {
+        try {
+            $stmt = $conn->prepare('SELECT * FROM cars WHERE id = ? LIMIT 1');
+
+            if (!$stmt) {
+                throw new RuntimeException('Unable to prepare the car query.');
+            }
+
+            $stmt->bind_param('i', $carId);
+            $stmt->execute();
+
+            $result = $stmt->get_result();
+            $car = $result->fetch_assoc();
+
+            $stmt->close();
+
+            if (!$car) {
+                http_response_code(404);
+                $pageError = 'Sorry, this car could not be found.';
+            }
+        } catch (Throwable $exception) {
+            error_log('CarHub car details error: ' . $exception->getMessage());
+            http_response_code(500);
+            $pageError = 'Unable to load the car details. Please try again later.';
+        }
+    }
+}
+
+// Read values safely in case some database fields are empty.
+$name = '';
+$brand = '';
+$model = '';
+$year = '';
+$price = 0;
+$fuel = '';
+$transmission = '';
+$mileage = '';
+$imageUrl = '';
+
+if ($car) {
+    $name = trim((string)($car['name'] ?? ''));
+    $brand = trim((string)($car['brand'] ?? ''));
+    $model = trim((string)($car['model'] ?? ''));
+    $year = $car['year'] ?? '';
+    $price = (float)($car['price'] ?? 0);
+    $fuel = $car['fuel'] ?? $car['fuel_type'] ?? '';
+    $transmission = $car['transmission'] ?? '';
+    $mileage = $car['mileage'] ?? '';
+
+    // Use the image filenames configured for your CarHub project.
+    $imageMap = [
+        'bmw'      => 'bmw-3-series.jpg.avif',
+        'audi'     => 'audi-a4.avif',
+        'swift'    => 'maruti-swift.jpg.avif',
+        'i20'      => 'hyundai-i20.jpg.avif',
+        'lexus'    => 'lexus-es.jpg.avif',
+        'velar'    => 'range-rover-velar.jpg.avif',
+        'fortuner' => '- toyota-fortuner.jpg.avif',
+        'gle'      => 'mercedes-gle.jpg.avif',
+        'c-class'  => 'mercedes-c-class.jpg.avif',
+        'e-class'  => 'mercedes-e-class.jpg.avif'
+    ];
+
+    $searchText = strtolower($brand . ' ' . $model . ' ' . $name);
+
+    foreach ($imageMap as $keyword => $filename) {
+        if (strpos($searchText, $keyword) !== false) {
+            $imagePath = __DIR__ . '/images/cars/' . $filename;
+
+            if (is_file($imagePath)) {
+                $imageUrl = 'images/cars/' . rawurlencode($filename);
+            }
+
             break;
         }
     }
 }
 
-// Verify image exists
-$imageAvailable = false;
-$imageUrl = '';
-
-if ($imageFile !== null) {
-    $localImagePath = __DIR__ . '/images/cars/' . $imageFile;
-
-    if (is_file($localImagePath)) {
-        $imageAvailable = true;
-        $imageUrl = 'images/cars/' . rawurlencode($imageFile);
-    }
-}
-
-// Precalculate formatted price
-$formattedPrice = number_format_indian($price);
+$pageTitle = $car
+    ? (($name !== '' ? $name : trim($brand . ' ' . $model)) . ' | CarHub')
+    : 'Car Details | CarHub';
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-    <title><?= h($displayName) ?> | CarHub</title>
+    <title><?= e($pageTitle) ?></title>
 
     <style>
         * {
@@ -172,287 +151,226 @@ $formattedPrice = number_format_indian($price);
         body {
             margin: 0;
             font-family: Arial, Helvetica, sans-serif;
-            color: #1e293b;
-            background: #f4f5f8;
+            background: #f4f6f9;
+            color: #20252b;
         }
 
         header {
-            background: #111;
-            color: white;
-            padding: 18px 7%;
+            background: #101820;
+            color: #fff;
+            padding: 17px 6%;
             display: flex;
             align-items: center;
             justify-content: space-between;
-            gap: 20px;
             flex-wrap: wrap;
+            gap: 15px;
         }
 
         .logo {
-            color: white;
+            color: #fff;
             text-decoration: none;
-            font-size: 30px;
+            font-size: 26px;
             font-weight: bold;
-        }
-
-        .logo span {
-            color: #ef3340;
         }
 
         nav {
             display: flex;
-            gap: 25px;
+            gap: 20px;
             flex-wrap: wrap;
         }
 
         nav a {
-            color: white;
+            color: #fff;
             text-decoration: none;
+            font-size: 15px;
         }
 
         nav a:hover {
-            color: #ef3340;
+            color: #ffb703;
         }
 
         .container {
-            max-width: 1350px;
+            max-width: 1150px;
+            width: 92%;
             margin: 35px auto;
-            padding: 0 20px;
         }
 
         .back-link {
             display: inline-block;
-            margin-bottom: 22px;
-            color: #111827;
+            margin-bottom: 20px;
+            color: #1769aa;
             text-decoration: none;
             font-weight: bold;
         }
 
         .car-card {
-            background: white;
-            border-radius: 20px;
+            display: grid;
+            grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+            background: #fff;
+            border-radius: 14px;
             overflow: hidden;
-            box-shadow: 0 10px 35px rgba(0, 0, 0, 0.08);
+            box-shadow: 0 5px 24px rgba(0, 0, 0, 0.08);
         }
 
         .car-image {
-            width: 100%;
-            height: 500px;
-            background: #e7eaf0;
+            min-height: 380px;
+            background: #eef1f4;
             display: flex;
             align-items: center;
             justify-content: center;
-            overflow: hidden;
+            padding: 20px;
         }
 
         .car-image img {
             display: block;
             width: 100%;
             height: 100%;
-            object-fit: cover;
-            object-position: center;
+            max-height: 450px;
+            object-fit: contain;
         }
 
-        .image-fallback {
+        .no-image {
+            color: #697586;
             text-align: center;
-            color: #64748b;
-            font-size: 16px;
+            padding: 25px;
         }
 
-        .car-icon {
-            display: block;
-            font-size: 55px;
-            margin-bottom: 12px;
+        .car-info {
+            padding: 32px;
         }
 
-        .car-content {
-            padding: 35px 42px;
-        }
-
-        .brand {
-            color: #ef3340;
-            text-transform: uppercase;
-            font-weight: bold;
-            margin-bottom: 8px;
-        }
-
-        h1 {
-            font-size: 42px;
-            margin: 0 0 15px;
-        }
-
-        .price {
-            color: #ef3340;
-            font-size: 28px;
-            font-weight: bold;
-            margin: 18px 0 25px;
-        }
-
-        .specifications {
-            display: grid;
-            grid-template-columns: repeat(4, minmax(0, 1fr));
-            gap: 15px;
-            margin: 25px 0;
-        }
-
-        .spec {
-            padding: 18px;
-            background: #f5f6f8;
-            border-radius: 10px;
-        }
-
-        .spec-label {
-            display: block;
-            font-size: 13px;
-            color: #64748b;
-            margin-bottom: 8px;
-        }
-
-        .spec-value {
-            font-weight: bold;
+        .car-info h1 {
+            font-size: 30px;
+            margin: 0 0 10px;
             overflow-wrap: anywhere;
         }
 
-        .description {
-            color: #475569;
-            line-height: 1.7;
-            white-space: pre-line;
+        .subtitle {
+            color: #667085;
+            margin-bottom: 20px;
+        }
+
+        .price {
+            color: #16803c;
+            font-size: 29px;
+            font-weight: bold;
+            margin: 20px 0;
+        }
+
+        .details-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 13px;
+            margin: 25px 0;
+        }
+
+        .detail {
+            padding: 14px;
+            background: #f5f7fa;
+            border-radius: 8px;
+            overflow-wrap: anywhere;
+        }
+
+        .detail-label {
+            display: block;
+            color: #667085;
+            font-size: 13px;
+            margin-bottom: 6px;
+        }
+
+        .detail-value {
+            font-weight: bold;
         }
 
         .actions {
             display: flex;
             gap: 12px;
             flex-wrap: wrap;
-            margin: 25px 0 35px;
-        }
-
-        .button {
-            display: inline-block;
-            padding: 14px 22px;
-            border: 0;
-            border-radius: 8px;
-            text-decoration: none;
-            text-align: center;
-            font-size: 15px;
-            font-weight: bold;
-            cursor: pointer;
-        }
-
-        .button-primary {
-            background: #ef3340;
-            color: white;
-        }
-
-        .button-secondary {
-            background: #111827;
-            color: white;
-        }
-
-        .emi-section {
-            background: #f5f6f8;
-            padding: 28px;
-            border-radius: 12px;
             margin-top: 25px;
         }
 
-        .emi-section h2 {
-            margin-top: 0;
-        }
-
-        .emi-form {
-            display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-            gap: 18px;
-        }
-
-        .form-group label {
-            display: block;
-            font-size: 14px;
-            font-weight: bold;
-            margin-bottom: 8px;
-        }
-
-        .form-group input,
-        .form-group select {
-            width: 100%;
-            padding: 12px;
-            border: 1px solid #cbd5e1;
+        .btn {
+            display: inline-block;
+            border: none;
             border-radius: 7px;
-            background: white;
+            padding: 13px 18px;
             font-size: 15px;
+            font-weight: bold;
+            text-decoration: none;
+            text-align: center;
+            cursor: pointer;
         }
 
-        .emi-result {
-            background: white;
-            border-radius: 9px;
-            padding: 18px;
-            margin-top: 22px;
+        .btn-primary {
+            color: #fff;
+            background: #1769aa;
         }
 
-        .emi-result strong {
-            color: #ef3340;
-            font-size: 26px;
+        .btn-secondary {
+            color: #20252b;
+            background: #e9edf2;
         }
 
-        .emi-note {
-            font-size: 13px;
-            line-height: 1.6;
-            color: #64748b;
+        .btn:hover {
+            opacity: 0.88;
+        }
+
+        .message {
+            background: #fff;
+            padding: 28px;
+            border-radius: 10px;
+            text-align: center;
+            box-shadow: 0 4px 18px rgba(0, 0, 0, 0.06);
         }
 
         footer {
             margin-top: 45px;
             padding: 22px;
-            background: #111;
-            color: white;
             text-align: center;
+            background: #101820;
+            color: #fff;
         }
 
-        @media (max-width: 850px) {
-            .specifications {
-                grid-template-columns: repeat(2, minmax(0, 1fr));
-            }
-
-            .car-image {
-                height: 380px;
-            }
-        }
-
-        @media (max-width: 600px) {
+        @media (max-width: 760px) {
             header {
-                padding: 18px 5%;
+                padding: 16px 5%;
             }
 
             nav {
-                gap: 14px;
+                gap: 12px;
             }
 
-            .container {
-                margin-top: 22px;
-                padding: 0 12px;
-            }
-
-            .car-image {
-                height: 280px;
-            }
-
-            .car-content {
-                padding: 24px 18px;
-            }
-
-            h1 {
-                font-size: 32px;
-            }
-
-            .specifications,
-            .emi-form {
+            .car-card {
                 grid-template-columns: 1fr;
             }
 
-            .emi-section {
-                padding: 20px;
+            .car-image {
+                min-height: 250px;
             }
 
-            .button {
+            .car-info {
+                padding: 23px;
+            }
+
+            .car-info h1 {
+                font-size: 25px;
+            }
+
+            .price {
+                font-size: 25px;
+            }
+        }
+
+        @media (max-width: 400px) {
+            .details-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .actions {
+                flex-direction: column;
+            }
+
+            .btn {
                 width: 100%;
             }
         }
@@ -460,228 +378,116 @@ $formattedPrice = number_format_indian($price);
 </head>
 
 <body>
-
 <header>
-    <a class="logo" href="index.php">CAR<span>HUB</span></a>
+    <a class="logo" href="index.php">CarHub</a>
 
     <nav>
         <a href="index.php">Home</a>
         <a href="cars.php">Cars</a>
-        <a href="about.php">About</a>
-        <a href="contact.php">Contact</a>
-        <a href="my-bookings.php">My Bookings</a>
+
+        <?php if (!empty($_SESSION['user_id'])): ?>
+            <a href="my-bookings.php">My Bookings</a>
+            <a href="my-test-drives.php">My Test Drives</a>
+            <a href="logout.php">Logout</a>
+        <?php else: ?>
+            <a href="login.php">Login</a>
+            <a href="register.php">Register</a>
+        <?php endif; ?>
     </nav>
 </header>
 
 <main class="container">
-
     <a class="back-link" href="cars.php">&larr; Back to Cars</a>
 
-    <section class="car-card">
-
-        <div class="car-image">
-            <?php if ($imageAvailable): ?>
-                <img
-                    src="<?= h($imageUrl) ?>"
-                    alt="<?= h($displayName) ?>"
-                    onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"
-                >
-                <div class="image-fallback" style="display:none;">
-                    <span class="car-icon">🚘</span>
-                    Image unavailable
-                </div>
-            <?php else: ?>
-                <div class="image-fallback">
-                    <span class="car-icon">🚘</span>
-                    Image unavailable
-                </div>
-            <?php endif; ?>
-        </div>
-
-        <div class="car-content">
-
-            <div class="brand"><?= h($brand ?: 'CarHub') ?></div>
-
-            <h1><?= h($model) ?></h1>
-
-            <!-- Indian numbering format -->
-            <div class="price">
-                ₹<?= h($formattedPrice) ?>
+    <?php if (!$car): ?>
+        <section class="message">
+            <h1>Car Details Unavailable</h1>
+            <p><?= e($pageError) ?></p>
+            <a class="btn btn-primary" href="cars.php">Browse Cars</a>
+        </section>
+    <?php else: ?>
+        <section class="car-card">
+            <div class="car-image">
+                <?php if ($imageUrl !== ''): ?>
+                    <img
+                        src="<?= e($imageUrl) ?>"
+                        alt="<?= e(trim($brand . ' ' . $model . ' ' . $name)) ?>"
+                    >
+                <?php else: ?>
+                    <div class="no-image">
+                        <p>Image is currently unavailable.</p>
+                        <p>Please check the image filename in <code>images/cars/</code>.</p>
+                    </div>
+                <?php endif; ?>
             </div>
 
-            <div class="specifications">
-                <div class="spec">
-                    <span class="spec-label">Manufacturing Year</span>
-                    <span class="spec-value"><?= h($year) ?></span>
-                </div>
+            <div class="car-info">
+                <h1><?= e($name !== '' ? $name : trim($brand . ' ' . $model)) ?></h1>
 
-                <div class="spec">
-                    <span class="spec-label">Fuel Type</span>
-                    <span class="spec-value"><?= h($fuel) ?></span>
-                </div>
-
-                <div class="spec">
-                    <span class="spec-label">Transmission</span>
-                    <span class="spec-value"><?= h($transmission) ?></span>
-                </div>
-
-                <div class="spec">
-                    <span class="spec-label">Mileage</span>
-                    <span class="spec-value">
-                        <?= h($mileage) ?><?= is_numeric($mileage) ? ' km/l' : '' ?>
-                    </span>
-                </div>
-            </div>
-
-            <h2>About This Vehicle</h2>
-            <p class="description"><?= h($description) ?></p>
-
-            <div class="actions">
-                <a
-                    class="button button-primary"
-                    href="booking.php?car_id=<?= (int) $car['id'] ?>"
-                >Book This Car</a>
-
-                <a
-                    class="button button-secondary"
-                    href="test-drive.php?car_id=<?= (int) $car['id'] ?>"
-                >Book a Test Drive</a>
-            </div>
-
-            <section class="emi-section">
-                <h2>EMI Calculator</h2>
-                <p>Estimate your monthly car loan payment.</p>
-
-                <div class="emi-form">
-                    <div class="form-group">
-                        <label for="downPayment">Down Payment (₹)</label>
-                        <input
-                            type="number"
-                            id="downPayment"
-                            min="0"
-                            max="<?= h($price) ?>"
-                            value="<?= h(round($price * 0.20)) ?>"
-                        >
-                    </div>
-
-                    <div class="form-group">
-                        <label for="interestRate">Annual Interest Rate (%)</label>
-                        <input
-                            type="number"
-                            id="interestRate"
-                            min="0"
-                            max="50"
-                            step="0.1"
-                            value="8.5"
-                        >
-                    </div>
-
-                    <div class="form-group">
-                        <label for="loanYears">Loan Period</label>
-                        <select id="loanYears">
-                            <option value="1">1 year</option>
-                            <option value="2">2 years</option>
-                            <option value="3">3 years</option>
-                            <option value="4">4 years</option>
-                            <option value="5" selected>5 years</option>
-                            <option value="6">6 years</option>
-                            <option value="7">7 years</option>
-                            <option value="8">8 years</option>
-                            <option value="9">9 years</option>
-                            <option value="10">10 years</option>
-                        </select>
-                    </div>
-                </div>
-
-                <div class="emi-result" aria-live="polite">
-                    <p>Estimated Monthly EMI</p>
-                    <strong id="emiAmount">₹0</strong>
-                    <p id="loanSummary"></p>
-                </div>
-
-                <p class="emi-note">
-                    This is an estimate only. Actual EMI, interest, fees,
-                    and loan eligibility depend on the lender.
+                <p class="subtitle">
+                    <?= e($brand) ?>
+                    <?= $model !== '' ? ' ' . e($model) : '' ?>
+                    <?= $year !== '' ? ' · ' . e($year) : '' ?>
                 </p>
-            </section>
 
-        </div>
-    </section>
+                <div class="price">
+                    <?= e(formatIndianPrice($price)) ?>
+                </div>
+
+                <h2>Vehicle Specifications</h2>
+
+                <div class="details-grid">
+                    <div class="detail">
+                        <span class="detail-label">Brand</span>
+                        <span class="detail-value"><?= e($brand ?: 'Not specified') ?></span>
+                    </div>
+
+                    <div class="detail">
+                        <span class="detail-label">Model</span>
+                        <span class="detail-value"><?= e($model ?: 'Not specified') ?></span>
+                    </div>
+
+                    <div class="detail">
+                        <span class="detail-label">Manufacturing Year</span>
+                        <span class="detail-value"><?= e($year ?: 'Not specified') ?></span>
+                    </div>
+
+                    <div class="detail">
+                        <span class="detail-label">Fuel Type</span>
+                        <span class="detail-value"><?= e($fuel ?: 'Not specified') ?></span>
+                    </div>
+
+                    <div class="detail">
+                        <span class="detail-label">Transmission</span>
+                        <span class="detail-value"><?= e($transmission ?: 'Not specified') ?></span>
+                    </div>
+
+                    <div class="detail">
+                        <span class="detail-label">Mileage</span>
+                        <span class="detail-value">
+                            <?= e($mileage !== '' && $mileage !== null ? $mileage : 'Not specified') ?>
+                        </span>
+                    </div>
+                </div>
+
+                <div class="actions">
+                    <a
+                        class="btn btn-primary"
+                        href="booking.php?car_id=<?= (int)$car['id'] ?>"
+                    >Book This Car</a>
+
+                    <a
+                        class="btn btn-secondary"
+                        href="test-drive.php?car_id=<?= (int)$car['id'] ?>"
+                    >Book a Test Drive</a>
+                </div>
+            </div>
+        </section>
+    <?php endif; ?>
 </main>
 
 <footer>
-    &copy; <?= date('Y') ?> CarHub. All rights reserved.
+    <p>&copy; <?= date('Y') ?> CarHub. All rights reserved.</p>
 </footer>
-
-<script>
-(function () {
-    const price = <?= json_encode($price) ?>;
-
-    const downPaymentInput = document.getElementById('downPayment');
-    const interestInput = document.getElementById('interestRate');
-    const yearsInput = document.getElementById('loanYears');
-    const emiAmount = document.getElementById('emiAmount');
-    const loanSummary = document.getElementById('loanSummary');
-
-    function formatRupees(amount) {
-        return '₹' + Math.round(amount).toLocaleString('en-IN');
-    }
-
-    function calculateEMI() {
-        const downPayment = Number(downPaymentInput.value);
-        const annualRate = Number(interestInput.value);
-        const years = Number(yearsInput.value);
-
-        if (
-            !Number.isFinite(price) ||
-            price <= 0 ||
-            !Number.isFinite(downPayment) ||
-            downPayment < 0 ||
-            downPayment > price ||
-            !Number.isFinite(annualRate) ||
-            annualRate < 0 ||
-            annualRate > 50 ||
-            !Number.isFinite(years) ||
-            years <= 0
-        ) {
-            emiAmount.textContent = 'Check your values';
-            loanSummary.textContent =
-                'Enter a valid down payment, interest rate, and loan period.';
-            return;
-        }
-
-        const principal = price - downPayment;
-        const months = years * 12;
-        const monthlyRate = annualRate / 1200;
-
-        let emi;
-
-        if (principal === 0) {
-            emi = 0;
-        } else if (monthlyRate === 0) {
-            emi = principal / months;
-        } else {
-            const factor = Math.pow(1 + monthlyRate, months);
-            emi = principal * monthlyRate * factor / (factor - 1);
-        }
-
-        const totalPayment = emi * months;
-        const totalInterest = totalPayment - principal;
-
-        emiAmount.textContent = formatRupees(emi);
-
-        loanSummary.textContent =
-            'Loan amount: ' + formatRupees(principal) +
-            ' | Total interest: ' + formatRupees(totalInterest);
-    }
-
-    downPaymentInput.addEventListener('input', calculateEMI);
-    interestInput.addEventListener('input', calculateEMI);
-    yearsInput.addEventListener('change', calculateEMI);
-
-    calculateEMI();
-})();
-</script>
-
 </body>
 </html>
