@@ -4,19 +4,17 @@ require_once __DIR__ . '/config/db.php';
 
 /*
 |--------------------------------------------------------------------------
-| CarHub - Cars Listing Page
+| CarHub Cars Listing
 |--------------------------------------------------------------------------
-| Car images folder: images/cars/
-| Database table: cars
+| Image directory: images/cars/
+| Images currently use .avif extensions.
 */
 
-// Escape output safely
 function e($value)
 {
     return htmlspecialchars((string)($value ?? ''), ENT_QUOTES, 'UTF-8');
 }
 
-// Get the first available field from a car record
 function getCarValue($car, $fields, $default = '')
 {
     foreach ($fields as $field) {
@@ -28,88 +26,66 @@ function getCarValue($car, $fields, $default = '')
     return $default;
 }
 
-// Find the car image URL
+/*
+|--------------------------------------------------------------------------
+| Match each vehicle to an existing image
+|--------------------------------------------------------------------------
+*/
+
 function getCarImage($car)
 {
-    $filename = getCarValue($car, [
-        'image',
-        'image_filename',
-        'image_name',
-        'image_url',
-        'image_path',
-        'photo',
-        'car_image'
-    ]);
+    $brand = strtolower((string)($car['brand'] ?? ''));
+    $model = strtolower((string)($car['model'] ?? ''));
+    $name  = strtolower((string)($car['name'] ?? ''));
 
-    // If the database has no image filename, use the car name
-    // to find a matching image in images/cars/.
-    if ($filename === '') {
-        $name = strtolower(
-            getCarValue($car, ['name', 'model'], '')
-        );
+    $search = $brand . ' ' . $model . ' ' . $name;
 
-        $brand = strtolower(
-            getCarValue($car, ['brand'], '')
-        );
+    $imageMap = [
+        'bmw'      => 'bmw-3-series.jpg.avif',
+        'audi'     => 'audi-a4.avif',
+        'swift'    => 'maruti-swift.jpg.avif',
+        'i20'      => 'hyundai-i20.jpg.avif',
+        'lexus'    => 'lexus-es.jpg.avif',
+        'velar'    => 'range-rover-velar.jpg.avif',
+        'fortuner' => '- toyota-fortuner.jpg.avif',
+        'gle'      => 'mercedes-gle.jpg.avif',
+        'c-class'  => 'mercedes-c-class.jpg.avif',
+        'e-class'  => 'mercedes-e-class.jpg.avif'
+    ];
 
-        $search = $brand . ' ' . $name;
+    // Use specific model matches before general brand matches.
+    $keywords = [
+        'fortuner', 'velar', 'c-class', 'e-class',
+        'gle', 'swift', 'i20', 'lexus', 'audi', 'bmw'
+    ];
 
-        $imageMap = [
-            'bmw' => 'bmw-3-series.jpg',
-            'audi' => 'audi-a4.jpg',
-            'lexus' => 'lexus-es.jpg',
-            'swift' => 'maruti-swift.jpg',
-            'i20' => 'hyundai-i20.jpg',
-            'velar' => 'range-rover-velar.jpg',
-            'fortuner' => 'toyota-fortuner.jpg',
-            'gle' => 'mercedes-gle.jpg',
-            'c-class' => 'mercedes-c-class.jpg',
-            'e-class' => 'mercedes-e-class.jpg'
-        ];
+    foreach ($keywords as $keyword) {
+        if (strpos($search, $keyword) !== false &&
+            isset($imageMap[$keyword])) {
 
-        foreach ($imageMap as $keyword => $image) {
-            if (strpos($search, $keyword) !== false) {
-                $filename = $image;
-                break;
+            $filename = $imageMap[$keyword];
+            $fullPath = __DIR__ . '/images/cars/' . $filename;
+
+            if (is_file($fullPath)) {
+                return 'images/cars/' . rawurlencode($filename);
             }
         }
-    }
-
-    // No image found
-    if ($filename === '') {
-        return '';
-    }
-
-    // Allow complete external image URLs when stored in the database
-    if (filter_var($filename, FILTER_VALIDATE_URL)) {
-        $scheme = strtolower((string)parse_url($filename, PHP_URL_SCHEME));
-
-        if (in_array($scheme, ['http', 'https'], true)) {
-            return $filename;
-        }
-
-        return '';
-    }
-
-    // Only accept a filename, not an arbitrary filesystem path
-    $filename = basename(str_replace('\\', '/', $filename));
-
-    $imageDirectory = __DIR__ . '/images/cars/';
-    $imageFile = $imageDirectory . $filename;
-
-    if (is_file($imageFile)) {
-        return 'images/cars/' . rawurlencode($filename);
     }
 
     return '';
 }
 
-// Fetch cars from the database
+/*
+|--------------------------------------------------------------------------
+| Load cars from database
+|--------------------------------------------------------------------------
+*/
+
 $cars = [];
 $errorMessage = '';
 
 try {
-    $result = $conn->query("SELECT * FROM cars ORDER BY id DESC LIMIT 10");
+    $result = $conn->query("SELECT * FROM cars ORDER BY id ASC LIMIT 10");
 
     if ($result) {
         while ($row = $result->fetch_assoc()) {
@@ -119,7 +95,7 @@ try {
         $result->free();
     }
 } catch (Throwable $error) {
-    error_log('CarHub cars listing error: ' . $error->getMessage());
+    error_log('CarHub listing error: ' . $error->getMessage());
     $errorMessage = 'Unable to load cars right now. Please try again later.';
 }
 ?>
@@ -151,7 +127,7 @@ try {
 
         .navbar {
             background: #111827;
-            color: #fff;
+            color: white;
             padding: 16px 6%;
             display: flex;
             justify-content: space-between;
@@ -161,7 +137,7 @@ try {
         }
 
         .logo {
-            color: #fff;
+            color: white;
             font-size: 26px;
             font-weight: 800;
         }
@@ -178,7 +154,7 @@ try {
         }
 
         .nav-links a {
-            color: #fff;
+            color: white;
             font-size: 14px;
         }
 
@@ -236,7 +212,7 @@ try {
         }
 
         .car-card {
-            background: #fff;
+            background: white;
             border-radius: 14px;
             overflow: hidden;
             box-shadow: 0 5px 22px rgba(15, 23, 42, 0.08);
@@ -250,7 +226,7 @@ try {
 
         .car-image {
             width: 100%;
-            height: 220px;
+            height: 240px;
             background: #e5e7eb;
             display: flex;
             align-items: center;
@@ -314,12 +290,11 @@ try {
         .details-btn {
             display: block;
             background: #111827;
-            color: #fff;
+            color: white;
             padding: 12px;
             border-radius: 7px;
             text-align: center;
             font-weight: 700;
-            transition: background 0.2s ease;
         }
 
         .details-btn:hover {
@@ -329,7 +304,7 @@ try {
 
         .empty-state,
         .error-state {
-            background: #fff;
+            background: white;
             border-radius: 12px;
             padding: 35px 20px;
             text-align: center;
@@ -407,6 +382,7 @@ try {
 </section>
 
 <main class="container">
+
     <div class="section-heading">
         <h2>Available Cars</h2>
         <span class="car-count">
@@ -434,36 +410,16 @@ try {
             <?php foreach ($cars as $car): ?>
 
                 <?php
-                    $id = (int) getCarValue($car, ['id'], 0);
-                    $name = getCarValue($car, ['name', 'model'], 'Car');
-
-                    $brand = getCarValue($car, ['brand'], '');
-                    $model = getCarValue($car, ['model'], '');
-
-                    $year = getCarValue($car, ['year'], '');
-                    $price = getCarValue($car, ['price'], '');
-
-                    $fuel = getCarValue(
-                        $car,
-                        ['fuel', 'fuel_type'],
-                        ''
-                    );
-
-                    $transmission = getCarValue(
-                        $car,
-                        ['transmission'],
-                        ''
-                    );
-
-                    $mileage = getCarValue($car, ['mileage'], '');
-
-                    $image = getCarImage($car);
-
-                    $displayName = trim($brand . ' ' . $model);
-
-                    if ($displayName === '') {
-                        $displayName = $name;
-                    }
+                $id = (int) getCarValue($car, ['id'], 0);
+                $brand = getCarValue($car, ['brand'], '');
+                $model = getCarValue($car, ['model', 'name'], 'Car');
+                $year = getCarValue($car, ['year'], '');
+                $price = getCarValue($car, ['price'], '');
+                $fuel = getCarValue($car, ['fuel', 'fuel_type'], '');
+                $transmission = getCarValue($car, ['transmission'], '');
+                $mileage = getCarValue($car, ['mileage'], '');
+                $image = getCarImage($car);
+                $displayName = trim($brand . ' ' . $model);
                 ?>
 
                 <article class="car-card">
@@ -509,30 +465,26 @@ try {
                         <?php endif; ?>
 
                         <div class="car-price">
-                            <?php if ($price !== '' && is_numeric($price)): ?>
-                                ₹<?php echo e(number_format((float)$price)); ?>
-                            <?php else: ?>
-                                Price on request
-                            <?php endif; ?>
+                            <?php
+                            echo ($price !== '' && is_numeric($price))
+                                ? '₹' . number_format((float)$price)
+                                : 'Price on request';
+                            ?>
                         </div>
 
                         <div class="car-specs">
 
                             <?php if ($fuel !== ''): ?>
-                                <span class="spec">
-                                    <?php echo e($fuel); ?>
-                                </span>
+                                <span class="spec"><?php echo e($fuel); ?></span>
                             <?php endif; ?>
 
                             <?php if ($transmission !== ''): ?>
-                                <span class="spec">
-                                    <?php echo e($transmission); ?>
-                                </span>
+                                <span class="spec"><?php echo e($transmission); ?></span>
                             <?php endif; ?>
 
                             <?php if ($mileage !== ''): ?>
                                 <span class="spec">
-                                    <?php echo e($mileage); ?> km
+                                    <?php echo e($mileage); ?> km/l
                                 </span>
                             <?php endif; ?>
 
