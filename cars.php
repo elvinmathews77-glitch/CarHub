@@ -1,4 +1,3 @@
-Save this as `cars.php`:
 
 ```php
 <?php
@@ -314,56 +313,28 @@ function e($value)
                 $mileage = $car['mileage'] ?? 'N/A';
                 $price = (float)($car['price'] ?? 0);
 
-                // Use a saved online URL if available.
-                $savedImage = trim((string)($car['image'] ?? ''));
-
-                $isHttpUrl = filter_var(
-                    $savedImage,
-                    FILTER_VALIDATE_URL
-                ) && in_array(
-                    strtolower((string)parse_url(
-                        $savedImage,
-                        PHP_URL_SCHEME
-                    )),
-                    ['http', 'https'],
-                    true
-                );
-
-                // Only direct HTTP/HTTPS URLs are used from the database.
-                $imageUrl = $isHttpUrl ? $savedImage : '';
+                // Do not trust old image URLs in the database: some point to
+                // pictures of different cars. Search for a matching model instead.
+                $imageUrl = '';
                 ?>
 
                 <div class="car-card">
 
                     <div class="car-image">
 
-                        <?php if ($imageUrl !== ''): ?>
-
-                            <img
-                                src="<?= e($imageUrl) ?>"
-                                alt="<?= e($name) ?>"
-                                loading="lazy"
-                                onerror="showPlaceholder(this)"
-                            >
-
-                        <?php else: ?>
-
-                            <img
-                                class="online-car-image"
-                                src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs="
-                                data-brand="<?= e($brand) ?>"
-                                data-model="<?= e($model) ?>"
-                                data-name="<?= e($name) ?>"
-                                alt="<?= e($name) ?>"
-                                loading="lazy"
-                                onerror="showPlaceholder(this)"
-                            >
-
-                            <div class="image-placeholder">
-                                Searching online for <?= e($name) ?>...
-                            </div>
-
-                        <?php endif; ?>
+                        <img
+                            class="online-car-image"
+                            src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs="
+                            data-brand="<?= e($brand) ?>"
+                            data-model="<?= e($model) ?>"
+                            data-name="<?= e($name) ?>"
+                            alt="<?= e($name) ?>"
+                            loading="lazy"
+                            onerror="showPlaceholder(this)"
+                        >
+                        <div class="image-placeholder">
+                            Finding a matching image for <?= e($name) ?>...
+                        </div>
 
                     </div>
 
@@ -435,35 +406,47 @@ function showPlaceholder(img) {
 }
 
 async function findOnlineCarImage(img) {
-    const brand = img.dataset.brand || '';
-    const model = img.dataset.model || img.dataset.name || '';
-
+    const brand = (img.dataset.brand || '').trim();
+    const model = (img.dataset.model || img.dataset.name || '').trim();
     const container = img.closest('.car-image');
-    const placeholder = container
-        ? container.querySelector('.image-placeholder')
-        : null;
+    const placeholder = container?.querySelector('.image-placeholder');
 
-    // Avoid searching if there is no model name.
-    if (!model.trim()) {
+    if (!model) {
         showPlaceholder(img);
         return;
     }
 
-    const searchTerms = [
-        '"' + brand + ' ' + model + '" car',
-        brand + ' ' + model + ' automobile'
+    const normalize = value => value.toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ').trim();
+
+    // Use model words as the main check. Short words like "ES" are too
+    // ambiguous, so they are not accepted as a model match by themselves.
+    const ignored = new Set(['car', 'cars', 'the', 'series', 'class', 'model']);
+    const modelWords = normalize(model).split(' ')
+        .filter(word => word.length >= 3 && !ignored.has(word));
+    const brandWords = normalize(brand).split(' ')
+        .filter(word => word.length >= 3);
+
+    if (modelWords.length === 0) {
+        showPlaceholder(img);
+        return;
+    }
+
+    const queries = [
+        `${brand} ${model} automobile`,
+        `${brand} ${model} vehicle`
     ];
 
     try {
         let pages = [];
 
-        for (const searchTerm of searchTerms) {
+        for (const query of queries) {
             const params = new URLSearchParams({
                 action: 'query',
                 generator: 'search',
-                gsrsearch: searchTerm,
+                gsrsearch: query,
                 gsrnamespace: '6',
-                gsrlimit: '10',
+                gsrlimit: '20',
                 prop: 'imageinfo',
                 iiprop: 'url|mime',
                 iiurlwidth: '900',
@@ -472,62 +455,42 @@ async function findOnlineCarImage(img) {
             });
 
             const response = await fetch(
-                'https://commons.wikimedia.org/w/api.php?' +
-                params.toString()
+                'https://commons.wikimedia.org/w/api.php?' + params.toString()
             );
-
-            if (!response.ok) {
-                throw new Error('Online image search failed');
-            }
+            if (!response.ok) continue;
 
             const data = await response.json();
             pages = Object.values(data.query?.pages || {});
-
-            if (pages.length > 0) break;
+            if (pages.length) break;
         }
 
-        // Prefer image filenames containing the brand/model terms.
-        const normalize = value => value
-            .toLowerCase()
-            .replace(/[^a-z0-9]+/g, ' ')
-            .trim();
+        const candidates = pages.map(page => {
+            const info = page.imageinfo?.[0];
+            if (!info?.thumburl) return null;
 
-        const expected = normalize(brand + ' ' + model)
-            .split(' ')
-            .filter(Boolean);
+            const title = normalize((page.title || '').replace(/^File:/i, ''));
+            const mime = (info.mime || '').toLowerCase();
+            if (!mime.startsWith('image/') || mime === 'image/svg+xml') return null;
 
-        const candidates = pages
-            .map(page => {
-                const info = page.imageinfo?.[0];
-                if (!info?.thumburl) return null;
+            const modelMatches = modelWords.filter(word => title.includes(word)).length;
+            const brandMatches = brandWords.filter(word => title.includes(word)).length;
 
-                const title = normalize(
-                    page.title.replace(/^File:/i, '')
-                );
+            // Require every meaningful model word in the image filename.
+            // Brand words add confidence, but are not mandatory because some
+            // legitimate Commons filenames use only the model name.
+            if (modelMatches !== modelWords.length) return null;
 
-                const mime = (info.mime || '').toLowerCase();
+            return {
+                url: info.thumburl,
+                title: page.title,
+                score: modelMatches * 10 + brandMatches
+            };
+        }).filter(Boolean).sort((a, b) => b.score - a.score);
 
-                if (!mime.startsWith('image/')) return null;
-                if (mime === 'image/svg+xml') return null;
+        const best = candidates[0];
 
-                const matchedTerms = expected.filter(term =>
-                    title.includes(term)
-                ).length;
-
-                return {
-                    url: info.thumburl,
-                    title: page.title,
-                    score: matchedTerms
-                };
-            })
-            .filter(Boolean)
-            .sort((a, b) => b.score - a.score);
-
-        // Avoid using a result when it doesn't match the model at all.
-        const best = candidates.find(item =>
-            item.score >= Math.min(2, expected.length)
-        );
-
+        // If the filename doesn't clearly identify the model, don't show a
+        // potentially unrelated vehicle.
         if (!best) {
             showPlaceholder(img);
             return;
@@ -537,23 +500,12 @@ async function findOnlineCarImage(img) {
             if (placeholder) placeholder.style.display = 'none';
             img.style.display = 'block';
         };
-
         img.onerror = () => showPlaceholder(img);
         img.src = best.url;
 
-        // Log the source page so the image can be checked for accuracy
-        // and licensing before production use.
-        console.info(
-            'Car image result:',
-            brand,
-            model,
-            'Source:',
-            'https://commons.wikimedia.org/wiki/' +
-            encodeURIComponent(best.title.replace(/ /g, '_'))
-        );
-
+        console.info('CarHub image source:', best.title);
     } catch (error) {
-        console.error('Image search failed for ' + model, error);
+        console.error('Image lookup failed for ' + model, error);
         showPlaceholder(img);
     }
 }
