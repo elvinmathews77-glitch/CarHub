@@ -1,945 +1,600 @@
+```php
 <?php
-
 session_start();
 
-/*
-|--------------------------------------------------------------------------
-| Database Connection
-|--------------------------------------------------------------------------
-| Use the common CarHub database connection file.
-*/
+require_once __DIR__ . "/config/db.php";
 
-require_once "config/db.php";
+// Escape output safely
+function e($value)
+{
+    return htmlspecialchars((string)($value ?? ''), ENT_QUOTES, 'UTF-8');
+}
 
-
-/*
-|--------------------------------------------------------------------------
-| Validate Car ID
-|--------------------------------------------------------------------------
-*/
-
-if (!isset($_GET['id']) || !is_numeric($_GET['id'])) {
-    die("Invalid car ID.");
+// Validate car ID
+if (!isset($_GET['id']) || !ctype_digit((string)$_GET['id']) || (int)$_GET['id'] < 1) {
+    http_response_code(400);
+    exit("Invalid car ID.");
 }
 
 $car_id = (int) $_GET['id'];
 
-
-/*
-|--------------------------------------------------------------------------
-| Get Car Details
-|--------------------------------------------------------------------------
-*/
-
+// Fetch car details
 $stmt = $conn->prepare("SELECT * FROM cars WHERE id = ?");
 
 if (!$stmt) {
-    die("Database query preparation failed.");
+    error_log("CarHub query preparation failed: " . $conn->error);
+    http_response_code(500);
+    exit("Unable to load car details.");
 }
 
 $stmt->bind_param("i", $car_id);
 $stmt->execute();
 
 $result = $stmt->get_result();
-
-
-if ($result->num_rows === 0) {
-    $stmt->close();
-    die("Car not found.");
-}
-
-
 $car = $result->fetch_assoc();
 
+$stmt->close();
 
-/*
-|--------------------------------------------------------------------------
-| Car Information
-|--------------------------------------------------------------------------
-*/
+if (!$car) {
+    http_response_code(404);
+    exit("Car not found.");
+}
 
+// Car information
 $brand = $car['brand'] ?? 'Car';
-
-$model = $car['model'] ?? 'Vehicle';
-
-$price = (float) ($car['price'] ?? 0);
-
+$model = $car['model'] ?? ($car['name'] ?? 'Vehicle');
+$price = (float)($car['price'] ?? 0);
 $year = $car['year'] ?? 'N/A';
-
-$fuel = $car['fuel'] ?? 'Not specified';
-
+$fuel = $car['fuel'] ?? ($car['fuel_type'] ?? 'Not specified');
 $transmission = $car['transmission'] ?? 'Not specified';
-
 $mileage = $car['mileage'] ?? 'Not specified';
-
 $description = $car['description'] ?? '';
 
-$brandLower = strtolower($brand);
+$displayName = trim($brand . ' ' . $model);
 
+// Match the car to the local image filename
+$searchText = strtolower($brand . ' ' . $model . ' ' . ($car['name'] ?? ''));
 
-/*
-|--------------------------------------------------------------------------
-| Car Image
-|--------------------------------------------------------------------------
-| Current project uses brand-based Unsplash images.
-*/
+$imageMap = [
+    'bmw'        => 'bmw-3-series.jpg',
+    'audi'       => 'audi-a4.jpg',
+    'swift'      => 'maruti-swift.jpg',
+    'i20'        => 'hyundai-i20.jpg',
+    'lexus'      => 'lexus-es.jpg',
+    'velar'      => 'range-rover-velar.jpg',
+    'fortuner'   => 'toyota-fortuner.jpg',
+    'gle'        => 'mercedes-gle.jpg',
+    'c-class'    => 'mercedes-c-class.jpg',
+    'e-class'    => 'mercedes-e-class.jpg'
+];
 
-if (strpos($brandLower, 'mercedes') !== false) {
+$filename = '';
 
-    $image = "https://images.unsplash.com/photo-1618843479313-40f8afb4b4d8?auto=format&fit=crop&w=1400&q=85";
-
-} elseif (strpos($brandLower, 'audi') !== false) {
-
-    $image = "https://images.unsplash.com/photo-1606664515524-ed2f786a0bd6?auto=format&fit=crop&w=1400&q=85";
-
-} elseif (strpos($brandLower, 'bmw') !== false) {
-
-    $image = "https://images.unsplash.com/photo-1555215695-3004980ad54e?auto=format&fit=crop&w=1400&q=85";
-
-} else {
-
-    $image = "https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?auto=format&fit=crop&w=1400&q=85";
+foreach ($imageMap as $keyword => $mappedFilename) {
+    if (strpos($searchText, $keyword) !== false) {
+        $filename = $mappedFilename;
+        break;
+    }
 }
 
+// Prefer a matching image filename stored in the database, if present.
+foreach (['image', 'image_filename', 'image_name', 'photo', 'car_image'] as $field) {
+    if (!empty($car[$field])) {
+        $storedFilename = basename(str_replace('\\', '/', (string)$car[$field]));
+
+        if (is_file(__DIR__ . '/images/cars/' . $storedFilename)) {
+            $filename = $storedFilename;
+            break;
+        }
+    }
+}
+
+// Only use a local image if the file exists.
+$image = '';
+
+if ($filename !== '' && is_file(__DIR__ . '/images/cars/' . $filename)) {
+    $image = 'images/cars/' . rawurlencode($filename);
+}
 ?>
-
 <!DOCTYPE html>
-
 <html lang="en">
-
 <head>
-
-<meta charset="UTF-8">
-
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-<title>
-    <?php echo htmlspecialchars($brand . ' ' . $model); ?> | CarHub
-</title>
-
-
-<style>
-
-/*
-|--------------------------------------------------------------------------
-| RESET
-|--------------------------------------------------------------------------
-*/
-
-* {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| BODY
-|--------------------------------------------------------------------------
-*/
-
-body {
-    font-family: Arial, Helvetica, sans-serif;
-    background: #f4f5f7;
-    color: #172033;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| NAVBAR
-|--------------------------------------------------------------------------
-*/
-
-.navbar {
-    height: 72px;
-    background: #111;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 8%;
-}
-
-.logo {
-    color: white;
-    font-size: 30px;
-    font-weight: 800;
-}
-
-.logo span {
-    color: #ef3340;
-}
-
-.nav-links {
-    display: flex;
-    gap: 28px;
-}
-
-.nav-links a {
-    color: white;
-    text-decoration: none;
-    font-size: 16px;
-}
-
-.nav-links a:hover {
-    color: #ef3340;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| MAIN CONTAINER
-|--------------------------------------------------------------------------
-*/
-
-.container {
-    width: 90%;
-    max-width: 1200px;
-    margin: 45px auto;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| BACK BUTTON
-|--------------------------------------------------------------------------
-*/
-
-.back {
-    display: inline-block;
-    margin-bottom: 25px;
-    color: #172033;
-    text-decoration: none;
-    font-weight: bold;
-}
-
-.back:hover {
-    color: #ef3340;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| DETAILS CARD
-|--------------------------------------------------------------------------
-*/
-
-.details-card {
-    background: white;
-    border-radius: 20px;
-    overflow: hidden;
-    box-shadow: 0 12px 35px rgba(0, 0, 0, 0.08);
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| CAR IMAGE
-|--------------------------------------------------------------------------
-*/
-
-.car-image {
-    width: 100%;
-    height: 500px;
-    background: #e7eaee;
-    position: relative;
-}
-
-.car-image img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
-}
-
-.image-fallback {
-    display: none;
-    position: absolute;
-    inset: 0;
-    align-items: center;
-    justify-content: center;
-    flex-direction: column;
-    background: linear-gradient(135deg, #e9edf2, #d9dee6);
-}
-
-.image-fallback .icon {
-    font-size: 100px;
-    margin-bottom: 15px;
-}
-
-.image-fallback h3 {
-    color: #667085;
-    font-size: 25px;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| CONTENT
-|--------------------------------------------------------------------------
-*/
-
-.content {
-    padding: 40px;
-}
-
-.brand {
-    color: #ef3340;
-    text-transform: uppercase;
-    font-size: 15px;
-    font-weight: bold;
-    margin-bottom: 8px;
-}
-
-h1 {
-    font-size: 42px;
-    margin-bottom: 15px;
-}
-
-.price {
-    font-size: 34px;
-    font-weight: bold;
-    color: #ef3340;
-    margin-bottom: 30px;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| SPECIFICATIONS
-|--------------------------------------------------------------------------
-*/
-
-.specs {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 15px;
-    margin-bottom: 35px;
-}
-
-.spec {
-    background: #f5f6f8;
-    padding: 20px;
-    border-radius: 12px;
-}
-
-.spec-label {
-    display: block;
-    color: #667085;
-    font-size: 14px;
-    margin-bottom: 8px;
-}
-
-.spec-value {
-    font-size: 17px;
-    font-weight: bold;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| DESCRIPTION
-|--------------------------------------------------------------------------
-*/
-
-.description {
-    border-top: 1px solid #e5e7eb;
-    padding-top: 30px;
-    margin-bottom: 30px;
-}
-
-.description h2 {
-    font-size: 25px;
-    margin-bottom: 12px;
-}
-
-.description p {
-    color: #667085;
-    line-height: 1.7;
-    font-size: 16px;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| EMI CALCULATOR
-|--------------------------------------------------------------------------
-*/
-
-.emi-calculator {
-    margin-top: 35px;
-    margin-bottom: 35px;
-    padding: 30px;
-    background: #f5f6f8;
-    border-radius: 15px;
-    border: 1px solid #e5e7eb;
-}
-
-.emi-calculator h2 {
-    font-size: 25px;
-    margin-bottom: 8px;
-}
-
-.emi-note {
-    color: #667085;
-    margin-bottom: 25px;
-    line-height: 1.5;
-}
-
-.emi-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 20px;
-}
-
-.emi-field label {
-    display: block;
-    font-weight: bold;
-    margin-bottom: 8px;
-}
-
-.emi-field input,
-.emi-field select {
-    width: 100%;
-    padding: 13px;
-    border: 1px solid #d0d5dd;
-    border-radius: 8px;
-    font-size: 16px;
-    background: white;
-    box-sizing: border-box;
-}
-
-.emi-field input:focus,
-.emi-field select:focus {
-    outline: none;
-    border-color: #ef3340;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| EMI BUTTON
-|--------------------------------------------------------------------------
-*/
-
-.calculate-emi {
-    width: 100%;
-    margin-top: 25px;
-    padding: 14px;
-    border: none;
-    border-radius: 8px;
-    background: #111827;
-    color: white;
-    font-size: 16px;
-    font-weight: bold;
-    cursor: pointer;
-}
-
-.calculate-emi:hover {
-    background: #ef3340;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| EMI RESULT
-|--------------------------------------------------------------------------
-*/
-
-.emi-result {
-    margin-top: 20px;
-    padding: 20px;
-    background: white;
-    border-radius: 10px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.emi-result span {
-    color: #667085;
-    font-weight: bold;
-}
-
-.emi-result strong {
-    color: #ef3340;
-    font-size: 25px;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| ACTION BUTTONS
-|--------------------------------------------------------------------------
-*/
-
-.actions {
-    display: flex;
-    gap: 15px;
-}
-
-.btn {
-    flex: 1;
-    text-align: center;
-    padding: 17px;
-    border-radius: 9px;
-    text-decoration: none;
-    font-weight: bold;
-    font-size: 17px;
-}
-
-.book-btn {
-    background: #ef3340;
-    color: white;
-}
-
-.test-btn {
-    background: #111827;
-    color: white;
-}
-
-.book-btn:hover {
-    background: #d92835;
-}
-
-.test-btn:hover {
-    background: #ef3340;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| FOOTER
-|--------------------------------------------------------------------------
-*/
-
-footer {
-    background: #111;
-    color: white;
-    text-align: center;
-    padding: 30px;
-    margin-top: 70px;
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| MOBILE RESPONSIVE
-|--------------------------------------------------------------------------
-*/
-
-@media(max-width: 800px) {
-
-    .navbar {
-        padding: 0 5%;
-    }
-
-    .nav-links {
-        display: none;
-    }
-
-    .container {
-        width: 94%;
-        margin: 25px auto;
-    }
-
-    .car-image {
-        height: 300px;
-    }
-
-    .content {
-        padding: 25px;
-    }
-
-    h1 {
-        font-size: 32px;
-    }
-
-    .price {
-        font-size: 28px;
-    }
-
-    .specs {
-        grid-template-columns: repeat(2, 1fr);
-    }
-
-    .actions {
-        flex-direction: column;
-    }
-
-    .emi-grid {
-        grid-template-columns: 1fr;
-    }
-
-    .emi-result {
-        flex-direction: column;
-        gap: 10px;
-        text-align: center;
-    }
-
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| SMALL MOBILE DEVICES
-|--------------------------------------------------------------------------
-*/
-
-@media(max-width: 480px) {
-
-    .logo {
-        font-size: 25px;
-    }
-
-    .content {
-        padding: 20px;
-    }
-
-    .specs {
-        grid-template-columns: 1fr;
-    }
-
-    .emi-calculator {
-        padding: 20px;
-    }
-
-    .emi-calculator h2 {
-        font-size: 22px;
-    }
-
-    .emi-result strong {
-        font-size: 22px;
-    }
-
-}
-
-</style>
-
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title><?php echo e($displayName); ?> | CarHub</title>
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: Arial, Helvetica, sans-serif;
+            background: #f4f5f7;
+            color: #172033;
+        }
+
+        .navbar {
+            min-height: 72px;
+            background: #111;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 20px;
+            padding: 15px 8%;
+            flex-wrap: wrap;
+        }
+
+        .logo {
+            color: white;
+            font-size: 30px;
+            font-weight: 800;
+            text-decoration: none;
+        }
+
+        .logo span {
+            color: #ef3340;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 24px;
+            flex-wrap: wrap;
+        }
+
+        .nav-links a {
+            color: white;
+            text-decoration: none;
+            font-size: 15px;
+        }
+
+        .nav-links a:hover {
+            color: #ef3340;
+        }
+
+        .container {
+            width: 90%;
+            max-width: 1200px;
+            margin: 40px auto;
+        }
+
+        .back {
+            display: inline-block;
+            margin-bottom: 22px;
+            color: #172033;
+            text-decoration: none;
+            font-weight: bold;
+        }
+
+        .back:hover {
+            color: #ef3340;
+        }
+
+        .details-card {
+            background: white;
+            border-radius: 18px;
+            overflow: hidden;
+            box-shadow: 0 12px 35px rgba(0, 0, 0, 0.08);
+        }
+
+        .car-image {
+            width: 100%;
+            height: 480px;
+            background: #e7eaee;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        .car-image img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
+        .image-fallback {
+            color: #667085;
+            font-size: 70px;
+            text-align: center;
+            padding: 20px;
+        }
+
+        .image-fallback p {
+            font-size: 16px;
+            margin-top: 12px;
+        }
+
+        .content {
+            padding: 38px;
+        }
+
+        .brand {
+            color: #ef3340;
+            text-transform: uppercase;
+            font-size: 15px;
+            font-weight: bold;
+            margin-bottom: 8px;
+        }
+
+        h1 {
+            font-size: 40px;
+            margin-bottom: 15px;
+        }
+
+        .price {
+            font-size: 32px;
+            font-weight: bold;
+            color: #ef3340;
+            margin-bottom: 28px;
+        }
+
+        .specs {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 15px;
+            margin-bottom: 32px;
+        }
+
+        .spec {
+            background: #f5f6f8;
+            padding: 18px;
+            border-radius: 10px;
+            overflow-wrap: anywhere;
+        }
+
+        .spec-label {
+            display: block;
+            color: #667085;
+            font-size: 13px;
+            margin-bottom: 8px;
+        }
+
+        .spec-value {
+            font-size: 16px;
+            font-weight: bold;
+        }
+
+        .description {
+            border-top: 1px solid #e5e7eb;
+            padding-top: 28px;
+            margin-bottom: 30px;
+        }
+
+        .description h2,
+        .emi-calculator h2 {
+            font-size: 25px;
+            margin-bottom: 12px;
+        }
+
+        .description p {
+            color: #667085;
+            line-height: 1.7;
+        }
+
+        .emi-calculator {
+            margin: 30px 0;
+            padding: 28px;
+            background: #f5f6f8;
+            border-radius: 14px;
+            border: 1px solid #e5e7eb;
+        }
+
+        .emi-note {
+            color: #667085;
+            margin-bottom: 22px;
+            line-height: 1.5;
+        }
+
+        .emi-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 20px;
+        }
+
+        .emi-field label {
+            display: block;
+            font-weight: bold;
+            margin-bottom: 8px;
+        }
+
+        .emi-field input,
+        .emi-field select {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #d0d5dd;
+            border-radius: 8px;
+            font-size: 16px;
+            background: white;
+        }
+
+        .calculate-emi {
+            width: 100%;
+            margin-top: 22px;
+            padding: 14px;
+            border: none;
+            border-radius: 8px;
+            background: #111827;
+            color: white;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .calculate-emi:hover {
+            background: #ef3340;
+        }
+
+        .emi-result {
+            margin-top: 18px;
+            padding: 20px;
+            background: white;
+            border-radius: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .emi-result span {
+            color: #667085;
+            font-weight: bold;
+        }
+
+        .emi-result strong {
+            color: #ef3340;
+            font-size: 25px;
+        }
+
+        .actions {
+            display: flex;
+            gap: 15px;
+        }
+
+        .btn {
+            flex: 1;
+            text-align: center;
+            padding: 16px;
+            border-radius: 9px;
+            text-decoration: none;
+            font-weight: bold;
+            font-size: 16px;
+        }
+
+        .book-btn {
+            background: #ef3340;
+            color: white;
+        }
+
+        .test-btn {
+            background: #111827;
+            color: white;
+        }
+
+        .book-btn:hover,
+        .test-btn:hover {
+            opacity: 0.88;
+        }
+
+        footer {
+            background: #111;
+            color: white;
+            text-align: center;
+            padding: 26px;
+            margin-top: 60px;
+        }
+
+        @media (max-width: 800px) {
+            .navbar {
+                padding: 16px 5%;
+            }
+
+            .nav-links {
+                gap: 14px;
+            }
+
+            .container {
+                width: 94%;
+                margin: 25px auto;
+            }
+
+            .car-image {
+                height: 320px;
+            }
+
+            .content {
+                padding: 25px;
+            }
+
+            h1 {
+                font-size: 32px;
+            }
+
+            .specs {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            .actions {
+                flex-direction: column;
+            }
+
+            .emi-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .logo {
+                font-size: 25px;
+            }
+
+            .nav-links {
+                gap: 12px;
+            }
+
+            .nav-links a {
+                font-size: 13px;
+            }
+
+            .content {
+                padding: 20px;
+            }
+
+            .car-image {
+                height: 240px;
+            }
+
+            .specs {
+                grid-template-columns: 1fr 1fr;
+                gap: 10px;
+            }
+
+            .spec {
+                padding: 13px;
+            }
+
+            .emi-calculator {
+                padding: 18px;
+            }
+
+            .emi-result {
+                flex-direction: column;
+                text-align: center;
+            }
+        }
+    </style>
 </head>
-
 
 <body>
 
-
-<!-- =========================================================
-     NAVBAR
-========================================================= -->
-
 <nav class="navbar">
-
-    <div class="logo">
-        CAR<span>HUB</span>
-    </div>
-
+    <a href="index.php" class="logo">CAR<span>HUB</span></a>
 
     <div class="nav-links">
-
-        <a href="index.php">
-            Home
-        </a>
-
-        <a href="cars.php">
-            Cars
-        </a>
-
-        <a href="about.php">
-            About
-        </a>
-
-        <a href="contact.php">
-            Contact
-        </a>
-
-        <a href="my-bookings.php">
-            My Bookings
-        </a>
-
+        <a href="index.php">Home</a>
+        <a href="cars.php">Cars</a>
+        <a href="about.php">About</a>
+        <a href="contact.php">Contact</a>
+        <a href="my-bookings.php">My Bookings</a>
     </div>
-
 </nav>
 
+<main class="container">
 
-
-<!-- =========================================================
-     MAIN
-========================================================= -->
-
-<div class="container">
-
-
-    <!-- BACK -->
-
-    <a href="cars.php" class="back">
-        ← Back to Cars
-    </a>
-
-
-
-    <!-- CAR DETAILS CARD -->
+    <a href="cars.php" class="back">&larr; Back to Cars</a>
 
     <div class="details-card">
 
-
-        <!-- =================================================
-             CAR IMAGE
-        ================================================== -->
-
         <div class="car-image">
-
-            <img
-                src="<?php echo htmlspecialchars($image); ?>"
-                alt="<?php echo htmlspecialchars($brand . ' ' . $model); ?>"
-                onerror="this.style.display='none'; document.getElementById('fallback').style.display='flex';"
-            >
-
-
-            <div class="image-fallback" id="fallback">
-
-                <div class="icon">
+            <?php if ($image !== ''): ?>
+                <img
+                    src="<?php echo e($image); ?>"
+                    alt="<?php echo e($displayName); ?>"
+                    onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"
+                >
+                <div class="image-fallback" style="display:none;">
                     🚘
+                    <p>Image unavailable</p>
                 </div>
-
-                <h3>
-                    <?php echo htmlspecialchars($brand); ?>
-                </h3>
-
-            </div>
-
+            <?php else: ?>
+                <div class="image-fallback">
+                    🚘
+                    <p>Image unavailable</p>
+                </div>
+            <?php endif; ?>
         </div>
-
-
-
-        <!-- =================================================
-             CONTENT
-        ================================================== -->
 
         <div class="content">
 
+            <div class="brand"><?php echo e($brand); ?></div>
 
-            <!-- BRAND -->
-
-            <div class="brand">
-
-                <?php echo htmlspecialchars($brand); ?>
-
-            </div>
-
-
-
-            <!-- MODEL -->
-
-            <h1>
-
-                <?php echo htmlspecialchars($model); ?>
-
-            </h1>
-
-
-
-            <!-- PRICE -->
+            <h1><?php echo e($model); ?></h1>
 
             <div class="price">
-
-                ₹<?php echo number_format($price); ?>
-
+                <?php echo $price > 0 ? '₹' . number_format($price) : 'Price on request'; ?>
             </div>
-
-
-
-            <!-- =================================================
-                 SPECIFICATIONS
-            ================================================== -->
 
             <div class="specs">
-
-
-                <!-- YEAR -->
-
                 <div class="spec">
-
-                    <span class="spec-label">
-                        Year
-                    </span>
-
-                    <span class="spec-value">
-
-                        <?php echo htmlspecialchars($year); ?>
-
-                    </span>
-
+                    <span class="spec-label">Year</span>
+                    <span class="spec-value"><?php echo e($year); ?></span>
                 </div>
 
-
-
-                <!-- FUEL -->
-
                 <div class="spec">
-
-                    <span class="spec-label">
-                        Fuel
-                    </span>
-
-                    <span class="spec-value">
-
-                        <?php echo htmlspecialchars($fuel); ?>
-
-                    </span>
-
+                    <span class="spec-label">Fuel</span>
+                    <span class="spec-value"><?php echo e($fuel); ?></span>
                 </div>
 
-
-
-                <!-- TRANSMISSION -->
-
                 <div class="spec">
-
-                    <span class="spec-label">
-                        Transmission
-                    </span>
-
-                    <span class="spec-value">
-
-                        <?php echo htmlspecialchars($transmission); ?>
-
-                    </span>
-
+                    <span class="spec-label">Transmission</span>
+                    <span class="spec-value"><?php echo e($transmission); ?></span>
                 </div>
 
-
-
-                <!-- MILEAGE -->
-
                 <div class="spec">
-
-                    <span class="spec-label">
-                        Mileage
-                    </span>
-
+                    <span class="spec-label">Mileage</span>
                     <span class="spec-value">
-
-                        <?php echo htmlspecialchars($mileage); ?>
-
+                        <?php
+                        echo e($mileage);
+                        if (is_numeric($mileage)) {
+                            echo ' km';
+                        }
+                        ?>
                     </span>
-
                 </div>
-
             </div>
 
-
-
-            <!-- =================================================
-                 DESCRIPTION
-            ================================================== -->
-
-            <div class="description">
-
-                <h2>
-                    About This Car
-                </h2>
-
-
+            <section class="description">
+                <h2>About This Car</h2>
                 <p>
-
                     <?php
-
-                    if (!empty($description)) {
-
-                        echo nl2br(
-                            htmlspecialchars($description)
-                        );
-
+                    if (trim((string)$description) !== '') {
+                        echo nl2br(e($description));
                     } else {
-
-                        echo "Experience a premium driving experience with the "
-                            . htmlspecialchars($brand . ' ' . $model)
-                            . ". Explore its features, specifications and performance before making your purchase.";
-
+                        echo 'Explore the features and specifications of '
+                            . e($displayName)
+                            . ' before making your booking.';
                     }
-
                     ?>
-
                 </p>
+            </section>
 
-            </div>
-
-
-
-            <!-- =================================================
-                 EMI / LOAN CALCULATOR
-            ================================================== -->
-
-            <div class="emi-calculator">
-
-
-                <h2>
-                    EMI / Loan Calculator
-                </h2>
-
+            <section class="emi-calculator">
+                <h2>EMI / Loan Calculator</h2>
 
                 <p class="emi-note">
-
-                    Calculate an estimated monthly EMI for this car.
-
+                    Calculate an estimated monthly payment. Actual bank rates,
+                    fees, and loan approval terms may differ.
                 </p>
 
-
-
                 <div class="emi-grid">
-
-
-                    <!-- CAR PRICE -->
-
                     <div class="emi-field">
-
-                        <label for="carPrice">
-                            Car Price (₹)
-                        </label>
-
-
+                        <label for="carPrice">Car Price (₹)</label>
                         <input
                             type="number"
                             id="carPrice"
-                            value="<?php echo $price; ?>"
+                            value="<?php echo e($price); ?>"
                             readonly
                         >
-
                     </div>
 
-
-
-                    <!-- DOWN PAYMENT -->
-
                     <div class="emi-field">
-
-                        <label for="downPayment">
-                            Down Payment (₹)
-                        </label>
-
-
+                        <label for="downPayment">Down Payment (₹)</label>
                         <input
                             type="number"
                             id="downPayment"
                             value="0"
                             min="0"
-                            max="<?php echo $price; ?>"
+                            max="<?php echo e($price); ?>"
                             step="1000"
                         >
-
                     </div>
 
-
-
-                    <!-- INTEREST RATE -->
-
                     <div class="emi-field">
-
-                        <label for="interestRate">
-                            Interest Rate (% per year)
-                        </label>
-
-
+                        <label for="interestRate">Interest Rate (% per year)</label>
                         <input
                             type="number"
                             id="interestRate"
@@ -948,356 +603,113 @@ footer {
                             max="100"
                             step="0.1"
                         >
-
                     </div>
-
-
-
-                    <!-- LOAN PERIOD -->
 
                     <div class="emi-field">
-
-                        <label for="loanYears">
-                            Loan Period
-                        </label>
-
-
+                        <label for="loanYears">Loan Period</label>
                         <select id="loanYears">
-
-                            <option value="1">
-                                1 Year
-                            </option>
-
-                            <option value="2">
-                                2 Years
-                            </option>
-
-                            <option value="3">
-                                3 Years
-                            </option>
-
-                            <option value="4">
-                                4 Years
-                            </option>
-
-                            <option value="5" selected>
-                                5 Years
-                            </option>
-
-                            <option value="6">
-                                6 Years
-                            </option>
-
-                            <option value="7">
-                                7 Years
-                            </option>
-
-                            <option value="8">
-                                8 Years
-                            </option>
-
-                            <option value="9">
-                                9 Years
-                            </option>
-
-                            <option value="10">
-                                10 Years
-                            </option>
-
+                            <option value="1">1 Year</option>
+                            <option value="2">2 Years</option>
+                            <option value="3">3 Years</option>
+                            <option value="4">4 Years</option>
+                            <option value="5" selected>5 Years</option>
+                            <option value="6">6 Years</option>
+                            <option value="7">7 Years</option>
+                            <option value="8">8 Years</option>
+                            <option value="9">9 Years</option>
+                            <option value="10">10 Years</option>
                         </select>
-
                     </div>
-
                 </div>
-
-
-
-                <!-- CALCULATE BUTTON -->
 
                 <button
                     type="button"
                     class="calculate-emi"
                     onclick="calculateEMI()"
                 >
-
                     Calculate EMI
-
                 </button>
 
-
-
-                <!-- EMI RESULT -->
-
-                <div class="emi-result">
-
-                    <span>
-                        Estimated Monthly EMI
-                    </span>
-
-
-                    <strong id="emiResult">
-
-                        ₹0
-
-                    </strong>
-
+                <div class="emi-result" aria-live="polite">
+                    <span>Estimated Monthly EMI</span>
+                    <strong id="emiResult">₹0</strong>
                 </div>
-
-
-            </div>
-
-
-
-            <!-- =================================================
-                 ACTION BUTTONS
-            ================================================== -->
+            </section>
 
             <div class="actions">
-
-
-                <!-- BOOK -->
-
                 <a
                     href="booking.php?car_id=<?php echo $car_id; ?>"
                     class="btn book-btn"
                 >
-
                     Book This Car
-
                 </a>
-
-
-
-                <!-- TEST DRIVE -->
 
                 <a
                     href="test-drive.php?car_id=<?php echo $car_id; ?>"
                     class="btn test-btn"
                 >
-
                     Request Test Drive
-
                 </a>
-
-
             </div>
 
-
         </div>
-
     </div>
-
-</div>
-
-
-
-<!-- =========================================================
-     FOOTER
-========================================================= -->
+</main>
 
 <footer>
-
-    © <?php echo date('Y'); ?> CarHub.
-    All Rights Reserved.
-
+    &copy; <?php echo date('Y'); ?> CarHub. All Rights Reserved.
 </footer>
 
-
-
-<!-- =========================================================
-     EMI CALCULATOR JAVASCRIPT
-========================================================= -->
-
 <script>
-
 function calculateEMI() {
-
-    /*
-    |--------------------------------------------------------------------------
-    | Get Values
-    |--------------------------------------------------------------------------
-    */
-
-    const price = parseFloat(
-        document.getElementById("carPrice").value
-    );
-
-
-    const downPayment = parseFloat(
-        document.getElementById("downPayment").value
-    );
-
-
-    const annualInterest = parseFloat(
-        document.getElementById("interestRate").value
-    );
-
-
-    const years = parseInt(
-        document.getElementById("loanYears").value
-    );
-
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | Validate Values
-    |--------------------------------------------------------------------------
-    */
+    const price = Number(document.getElementById('carPrice').value);
+    const downPayment = Number(document.getElementById('downPayment').value);
+    const annualInterest = Number(document.getElementById('interestRate').value);
+    const years = Number(document.getElementById('loanYears').value);
+    const result = document.getElementById('emiResult');
 
     if (
-        isNaN(price) ||
-        isNaN(downPayment) ||
-        isNaN(annualInterest) ||
-        isNaN(years)
+        !Number.isFinite(price) ||
+        !Number.isFinite(downPayment) ||
+        !Number.isFinite(annualInterest) ||
+        !Number.isFinite(years) ||
+        price <= 0 ||
+        downPayment < 0 ||
+        downPayment > price ||
+        annualInterest < 0 ||
+        annualInterest > 100 ||
+        years <= 0
     ) {
-
-        alert("Please enter valid values.");
-
+        alert('Please enter valid loan values.');
         return;
     }
 
-
-
-    if (price <= 0) {
-
-        alert("Invalid car price.");
-
-        return;
-    }
-
-
-
-    if (downPayment < 0) {
-
-        alert("Down payment cannot be negative.");
-
-        return;
-    }
-
-
-
-    if (downPayment > price) {
-
-        alert("Down payment cannot be greater than the car price.");
-
-        return;
-    }
-
-
-
-    if (annualInterest < 0) {
-
-        alert("Interest rate cannot be negative.");
-
-        return;
-    }
-
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | Calculate Loan Amount
-    |--------------------------------------------------------------------------
-    */
-
-    const loanAmount =
-        price - downPayment;
-
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | Convert Annual Interest Rate
-    | to Monthly Interest Rate
-    |--------------------------------------------------------------------------
-    */
-
-    const monthlyInterest =
-        annualInterest / 12 / 100;
-
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | Total Number of Monthly Payments
-    |--------------------------------------------------------------------------
-    */
-
-    const numberOfPayments =
-        years * 12;
-
-
+    const principal = price - downPayment;
+    const monthlyRate = annualInterest / 1200;
+    const numberOfPayments = years * 12;
 
     let emi;
 
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | EMI Calculation
-    |--------------------------------------------------------------------------
-    |
-    | EMI = P × r × (1+r)^n / ((1+r)^n - 1)
-    |
-    */
-
-    if (monthlyInterest === 0) {
-
-        emi =
-            loanAmount / numberOfPayments;
-
+    if (principal === 0) {
+        emi = 0;
+    } else if (monthlyRate === 0) {
+        emi = principal / numberOfPayments;
     } else {
-
-        const power =
-            Math.pow(
-                1 + monthlyInterest,
-                numberOfPayments
-            );
-
-
-        emi =
-            loanAmount *
-            monthlyInterest *
-            power /
-            (power - 1);
-
+        const factor = Math.pow(1 + monthlyRate, numberOfPayments);
+        emi = principal * monthlyRate * factor / (factor - 1);
     }
 
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | Display EMI
-    |--------------------------------------------------------------------------
-    */
-
-    document.getElementById("emiResult").textContent =
-        "₹" +
-        emi.toLocaleString("en-IN", {
-            maximumFractionDigits: 0
-        });
-
+    result.textContent = '₹' + Math.round(emi).toLocaleString('en-IN');
 }
 
+// Calculate the default estimate when the page opens.
+calculateEMI();
 </script>
 
-
 </body>
-
 </html>
 
-
 <?php
-
-/*
-|--------------------------------------------------------------------------
-| Close Database Resources
-|--------------------------------------------------------------------------
-*/
-
-$stmt->close();
-
 $conn->close();
-
 ?>
+```

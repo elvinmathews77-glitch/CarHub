@@ -1,27 +1,126 @@
-
 ```php
 <?php
-session_start();
-require_once "config/db.php";
+require_once __DIR__ . '/config/db.php';
 
-$cars = [];
+/*
+|--------------------------------------------------------------------------
+| CarHub - Cars Listing Page
+|--------------------------------------------------------------------------
+| Car images folder: images/cars/
+| Database table: cars
+*/
 
-$sql = "SELECT * FROM cars ORDER BY id DESC";
-$result = $conn->query($sql);
-
-if ($result) {
-    while ($row = $result->fetch_assoc()) {
-        $cars[] = $row;
-    }
-}
-
+// Escape output safely
 function e($value)
 {
-    return htmlspecialchars(
-        (string)($value ?? ''),
-        ENT_QUOTES,
-        'UTF-8'
-    );
+    return htmlspecialchars((string)($value ?? ''), ENT_QUOTES, 'UTF-8');
+}
+
+// Get the first available field from a car record
+function getCarValue($car, $fields, $default = '')
+{
+    foreach ($fields as $field) {
+        if (isset($car[$field]) && $car[$field] !== '') {
+            return $car[$field];
+        }
+    }
+
+    return $default;
+}
+
+// Find the car image URL
+function getCarImage($car)
+{
+    $filename = getCarValue($car, [
+        'image',
+        'image_filename',
+        'image_name',
+        'image_url',
+        'image_path',
+        'photo',
+        'car_image'
+    ]);
+
+    // If the database has no image filename, use the car name
+    // to find a matching image in images/cars/.
+    if ($filename === '') {
+        $name = strtolower(
+            getCarValue($car, ['name', 'model'], '')
+        );
+
+        $brand = strtolower(
+            getCarValue($car, ['brand'], '')
+        );
+
+        $search = $brand . ' ' . $name;
+
+        $imageMap = [
+            'bmw' => 'bmw-3-series.jpg',
+            'audi' => 'audi-a4.jpg',
+            'lexus' => 'lexus-es.jpg',
+            'swift' => 'maruti-swift.jpg',
+            'i20' => 'hyundai-i20.jpg',
+            'velar' => 'range-rover-velar.jpg',
+            'fortuner' => 'toyota-fortuner.jpg',
+            'gle' => 'mercedes-gle.jpg',
+            'c-class' => 'mercedes-c-class.jpg',
+            'e-class' => 'mercedes-e-class.jpg'
+        ];
+
+        foreach ($imageMap as $keyword => $image) {
+            if (strpos($search, $keyword) !== false) {
+                $filename = $image;
+                break;
+            }
+        }
+    }
+
+    // No image found
+    if ($filename === '') {
+        return '';
+    }
+
+    // Allow complete external image URLs when stored in the database
+    if (filter_var($filename, FILTER_VALIDATE_URL)) {
+        $scheme = strtolower((string)parse_url($filename, PHP_URL_SCHEME));
+
+        if (in_array($scheme, ['http', 'https'], true)) {
+            return $filename;
+        }
+
+        return '';
+    }
+
+    // Only accept a filename, not an arbitrary filesystem path
+    $filename = basename(str_replace('\\', '/', $filename));
+
+    $imageDirectory = __DIR__ . '/images/cars/';
+    $imageFile = $imageDirectory . $filename;
+
+    if (is_file($imageFile)) {
+        return 'images/cars/' . rawurlencode($filename);
+    }
+
+    return '';
+}
+
+// Fetch cars from the database
+$cars = [];
+$errorMessage = '';
+
+try {
+    $result = $conn->query("SELECT * FROM cars ORDER BY id DESC LIMIT 10");
+
+    if ($result) {
+        while ($row = $result->fetch_assoc()) {
+            $cars[] = $row;
+        }
+
+        $result->free();
+    }
+} catch (Throwable $error) {
+    error_log('CarHub cars listing error: ' . $error->getMessage());
+    $errorMessage = 'Unable to load cars right now. Please try again later.';
 }
 ?>
 <!DOCTYPE html>
@@ -29,7 +128,8 @@ function e($value)
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cars - CarHub</title>
+
+    <title>Browse Cars | CarHub</title>
 
     <style>
         * {
@@ -40,97 +140,122 @@ function e($value)
 
         body {
             font-family: Arial, Helvetica, sans-serif;
-            background: #f5f5f5;
-            color: #171717;
+            background: #f5f7fb;
+            color: #222;
+            line-height: 1.6;
+        }
+
+        a {
+            text-decoration: none;
         }
 
         .navbar {
-            min-height: 98px;
-            background: #111;
+            background: #111827;
+            color: #fff;
+            padding: 16px 6%;
             display: flex;
-            align-items: center;
             justify-content: space-between;
-            padding: 20px 7.5%;
+            align-items: center;
             gap: 20px;
+            flex-wrap: wrap;
         }
 
         .logo {
-            color: white;
-            font-size: 32px;
+            color: #fff;
+            font-size: 26px;
             font-weight: 800;
-            white-space: nowrap;
         }
 
         .logo span {
-            color: #ef3340;
+            color: #f59e0b;
         }
 
         .nav-links {
             display: flex;
-            gap: 25px;
-            list-style: none;
+            gap: 20px;
+            align-items: center;
             flex-wrap: wrap;
         }
 
         .nav-links a {
-            color: white;
-            text-decoration: none;
-            font-size: 16px;
+            color: #fff;
+            font-size: 14px;
         }
 
         .nav-links a:hover {
-            color: #ef3340;
+            color: #f59e0b;
         }
 
-        .page {
-            max-width: 1400px;
-            margin: auto;
-            padding: 65px 30px 80px;
-        }
-
-        .heading {
+        .hero {
+            background: linear-gradient(135deg, #111827, #263b59);
+            color: white;
+            padding: 55px 6%;
             text-align: center;
-            margin-bottom: 50px;
         }
 
-        .heading h1 {
-            font-size: 48px;
-            margin-bottom: 12px;
+        .hero h1 {
+            font-size: clamp(30px, 4vw, 44px);
+            margin-bottom: 10px;
         }
 
-        .heading h1 span {
-            color: #ef3340;
+        .hero p {
+            color: #d1d5db;
+            max-width: 650px;
+            margin: 0 auto;
         }
 
-        .heading p {
+        .container {
+            width: 88%;
+            max-width: 1250px;
+            margin: 35px auto 60px;
+        }
+
+        .section-heading {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 15px;
+            flex-wrap: wrap;
+            margin-bottom: 25px;
+        }
+
+        .section-heading h2 {
+            font-size: 27px;
+            color: #111827;
+        }
+
+        .car-count {
             color: #64748b;
-            font-size: 19px;
+            font-size: 14px;
         }
 
         .car-grid {
             display: grid;
             grid-template-columns: repeat(3, minmax(0, 1fr));
-            gap: 32px;
+            gap: 25px;
         }
 
         .car-card {
-            background: white;
-            border-radius: 12px;
+            background: #fff;
+            border-radius: 14px;
             overflow: hidden;
-            box-shadow: 0 8px 25px rgba(0, 0, 0, .08);
-            transition: transform .25s;
+            box-shadow: 0 5px 22px rgba(15, 23, 42, 0.08);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
         }
 
         .car-card:hover {
             transform: translateY(-5px);
+            box-shadow: 0 12px 28px rgba(15, 23, 42, 0.14);
         }
 
         .car-image {
             width: 100%;
-            height: 255px;
+            height: 220px;
             background: #e5e7eb;
+            display: flex;
+            align-items: center;
+            justify-content: center;
             overflow: hidden;
-            position: relative;
         }
 
         .car-image img {
@@ -141,128 +266,119 @@ function e($value)
         }
 
         .image-placeholder {
-            width: 100%;
-            height: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
             color: #64748b;
-            font-size: 16px;
+            font-size: 15px;
             text-align: center;
-            padding: 15px;
-            background: #e5e7eb;
+            padding: 20px;
         }
 
         .car-content {
-            padding: 24px;
+            padding: 20px;
         }
 
-        .brand {
-            color: #ef3340;
+        .car-title {
+            color: #111827;
+            font-size: 21px;
+            line-height: 1.3;
+            margin-bottom: 5px;
+        }
+
+        .car-brand {
+            color: #64748b;
             font-size: 14px;
-            font-weight: 700;
-            text-transform: uppercase;
-            margin-bottom: 10px;
+            margin-bottom: 12px;
         }
 
-        .car-name {
-            font-size: 27px;
-            margin-bottom: 16px;
-            overflow-wrap: anywhere;
+        .car-price {
+            color: #e58a00;
+            font-size: 23px;
+            font-weight: 800;
+            margin: 10px 0 15px;
         }
 
-        .specs {
+        .car-specs {
             display: flex;
-            gap: 8px;
             flex-wrap: wrap;
-            margin-bottom: 20px;
+            gap: 8px;
+            margin-bottom: 18px;
         }
 
         .spec {
-            background: #f1f1f1;
+            background: #f1f5f9;
             color: #475569;
-            padding: 8px 11px;
-            border-radius: 4px;
-            font-size: 13px;
+            border-radius: 6px;
+            padding: 5px 9px;
+            font-size: 12px;
         }
 
-        .price {
-            font-size: 24px;
-            font-weight: 800;
-            margin-bottom: 20px;
-        }
-
-        .view-button {
+        .details-btn {
             display: block;
-            width: 100%;
-            padding: 14px;
-            background: #ef3340;
-            color: white;
-            text-decoration: none;
+            background: #111827;
+            color: #fff;
+            padding: 12px;
+            border-radius: 7px;
             text-align: center;
-            border-radius: 5px;
-            font-size: 16px;
-            font-weight: 600;
+            font-weight: 700;
+            transition: background 0.2s ease;
         }
 
-        .view-button:hover {
-            background: #d92735;
+        .details-btn:hover {
+            background: #f59e0b;
+            color: #111827;
         }
 
-        .no-cars {
-            text-align: center;
-            background: white;
-            padding: 70px 20px;
+        .empty-state,
+        .error-state {
+            background: #fff;
             border-radius: 12px;
-        }
-
-        .no-cars h2 {
-            margin-bottom: 10px;
-        }
-
-        .no-cars p {
+            padding: 35px 20px;
+            text-align: center;
             color: #64748b;
+            grid-column: 1 / -1;
+        }
+
+        .error-state {
+            color: #b91c1c;
         }
 
         footer {
-            background: #111;
-            color: white;
+            background: #111827;
+            color: #cbd5e1;
+            padding: 24px 6%;
             text-align: center;
-            padding: 35px;
+            font-size: 14px;
         }
 
-        footer p {
-            color: #9ca3af;
-            margin: 5px;
-        }
-
-        @media (max-width: 1000px) {
+        @media (max-width: 950px) {
             .car-grid {
                 grid-template-columns: repeat(2, minmax(0, 1fr));
             }
         }
 
-        @media (max-width: 700px) {
+        @media (max-width: 600px) {
             .navbar {
-                flex-direction: column;
-                padding: 20px;
+                padding: 15px 5%;
             }
 
             .nav-links {
-                justify-content: center;
-                gap: 15px;
+                gap: 12px;
+            }
+
+            .hero {
+                padding: 40px 5%;
+            }
+
+            .container {
+                width: 92%;
+                margin-top: 25px;
             }
 
             .car-grid {
                 grid-template-columns: 1fr;
             }
 
-            .heading h1 {
-                font-size: 36px;
-            }
-
-            .page {
-                padding: 40px 18px 60px;
+            .car-image {
+                height: 230px;
             }
         }
     </style>
@@ -270,261 +386,179 @@ function e($value)
 
 <body>
 
-<nav class="navbar">
-    <div class="logo">CAR<span>HUB</span></div>
+<header class="navbar">
+    <a class="logo" href="index.php">Car<span>Hub</span></a>
 
-    <ul class="nav-links">
-        <li><a href="index.php">Home</a></li>
-        <li><a href="cars.php">Cars</a></li>
-        <li><a href="about.php">About</a></li>
-        <li><a href="contact.php">Contact</a></li>
-        <li><a href="my-bookings.php">My Bookings</a></li>
+    <nav class="nav-links">
+        <a href="index.php">Home</a>
+        <a href="cars.php">Browse Cars</a>
+        <a href="about.php">About</a>
+        <a href="contact.php">Contact</a>
+        <a href="my-bookings.php">My Bookings</a>
+    </nav>
+</header>
 
-        <?php if (isset($_SESSION['user_id'])): ?>
-            <li><a href="logout.php">Logout</a></li>
-        <?php else: ?>
-            <li><a href="login.php">Login</a></li>
-        <?php endif; ?>
-    </ul>
-</nav>
+<section class="hero">
+    <h1>Find Your Perfect Car</h1>
+    <p>
+        Explore our collection of vehicles, compare their features,
+        and choose a car that suits your needs.
+    </p>
+</section>
 
-<main class="page">
-
-    <div class="heading">
-        <h1>Explore Our <span>Cars</span></h1>
-        <p>Find the perfect car for your needs and budget.</p>
+<main class="container">
+    <div class="section-heading">
+        <h2>Available Cars</h2>
+        <span class="car-count">
+            <?php echo count($cars); ?> cars displayed
+        </span>
     </div>
 
-    <?php if (!empty($cars)): ?>
+    <div class="car-grid">
 
-        <div class="car-grid">
+        <?php if ($errorMessage !== ''): ?>
+
+            <div class="error-state">
+                <?php echo e($errorMessage); ?>
+            </div>
+
+        <?php elseif (empty($cars)): ?>
+
+            <div class="empty-state">
+                <h3>No cars available</h3>
+                <p>Please check again later.</p>
+            </div>
+
+        <?php else: ?>
 
             <?php foreach ($cars as $car): ?>
 
                 <?php
-                $id = (int)($car['id'] ?? 0);
-                $name = trim((string)($car['name'] ?? 'Car'));
-                $brand = trim((string)($car['brand'] ?? ''));
-                $model = trim((string)($car['model'] ?? $name));
+                    $id = (int) getCarValue($car, ['id'], 0);
+                    $name = getCarValue($car, ['name', 'model'], 'Car');
 
-                $year = $car['year'] ?? 'N/A';
-                $fuel = $car['fuel'] ?? 'N/A';
-                $transmission = $car['transmission'] ?? 'N/A';
-                $mileage = $car['mileage'] ?? 'N/A';
-                $price = (float)($car['price'] ?? 0);
+                    $brand = getCarValue($car, ['brand'], '');
+                    $model = getCarValue($car, ['model'], '');
 
-                // Do not trust old image URLs in the database: some point to
-                // pictures of different cars. Search for a matching model instead.
-                $imageUrl = '';
+                    $year = getCarValue($car, ['year'], '');
+                    $price = getCarValue($car, ['price'], '');
+
+                    $fuel = getCarValue(
+                        $car,
+                        ['fuel', 'fuel_type'],
+                        ''
+                    );
+
+                    $transmission = getCarValue(
+                        $car,
+                        ['transmission'],
+                        ''
+                    );
+
+                    $mileage = getCarValue($car, ['mileage'], '');
+
+                    $image = getCarImage($car);
+
+                    $displayName = trim($brand . ' ' . $model);
+
+                    if ($displayName === '') {
+                        $displayName = $name;
+                    }
                 ?>
 
-                <div class="car-card">
+                <article class="car-card">
 
                     <div class="car-image">
 
-                        <img
-                            class="online-car-image"
-                            src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs="
-                            data-brand="<?= e($brand) ?>"
-                            data-model="<?= e($model) ?>"
-                            data-name="<?= e($name) ?>"
-                            alt="<?= e($name) ?>"
-                            loading="lazy"
-                            onerror="showPlaceholder(this)"
-                        >
-                        <div class="image-placeholder">
-                            Finding a matching image for <?= e($name) ?>...
-                        </div>
+                        <?php if ($image !== ''): ?>
+
+                            <img
+                                src="<?php echo e($image); ?>"
+                                alt="<?php echo e($displayName); ?>"
+                                loading="lazy"
+                                onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"
+                            >
+
+                            <div
+                                class="image-placeholder"
+                                style="display:none;"
+                            >
+                                Image unavailable
+                            </div>
+
+                        <?php else: ?>
+
+                            <div class="image-placeholder">
+                                Image unavailable
+                            </div>
+
+                        <?php endif; ?>
 
                     </div>
 
                     <div class="car-content">
 
-                        <div class="brand"><?= e($brand) ?></div>
+                        <h3 class="car-title">
+                            <?php echo e($displayName); ?>
+                        </h3>
 
-                        <h2 class="car-name"><?= e($name) ?></h2>
+                        <?php if ($year !== ''): ?>
+                            <p class="car-brand">
+                                Model year: <?php echo e($year); ?>
+                            </p>
+                        <?php endif; ?>
 
-                        <div class="specs">
-                            <span class="spec"><?= e($year) ?></span>
-                            <span class="spec"><?= e($fuel) ?></span>
-                            <span class="spec"><?= e($transmission) ?></span>
-                            <span class="spec"><?= e($mileage) ?></span>
+                        <div class="car-price">
+                            <?php if ($price !== '' && is_numeric($price)): ?>
+                                ₹<?php echo e(number_format((float)$price)); ?>
+                            <?php else: ?>
+                                Price on request
+                            <?php endif; ?>
                         </div>
 
-                        <div class="price">
-                            ₹<?= number_format($price) ?>
+                        <div class="car-specs">
+
+                            <?php if ($fuel !== ''): ?>
+                                <span class="spec">
+                                    <?php echo e($fuel); ?>
+                                </span>
+                            <?php endif; ?>
+
+                            <?php if ($transmission !== ''): ?>
+                                <span class="spec">
+                                    <?php echo e($transmission); ?>
+                                </span>
+                            <?php endif; ?>
+
+                            <?php if ($mileage !== ''): ?>
+                                <span class="spec">
+                                    <?php echo e($mileage); ?> km
+                                </span>
+                            <?php endif; ?>
+
                         </div>
 
                         <a
-                            href="car-details.php?id=<?= $id ?>"
-                            class="view-button"
+                            class="details-btn"
+                            href="car-details.php?id=<?php echo $id; ?>"
                         >
                             View Details
                         </a>
 
                     </div>
-                </div>
+                </article>
 
             <?php endforeach; ?>
 
-        </div>
+        <?php endif; ?>
 
-    <?php else: ?>
-
-        <div class="no-cars">
-            <h2>No Cars Available</h2>
-            <p>There are currently no cars available.</p>
-        </div>
-
-    <?php endif; ?>
-
+    </div>
 </main>
 
 <footer>
-    <p>&copy; <?= date('Y') ?> CarHub</p>
-    <p>Your trusted car selling platform.</p>
+    <p>&copy; <?php echo date('Y'); ?> CarHub. All rights reserved.</p>
 </footer>
-
-<script>
-function showPlaceholder(img) {
-    const container = img.closest('.car-image');
-    if (!container) return;
-
-    img.style.display = 'none';
-
-    let placeholder = container.querySelector('.image-placeholder');
-
-    if (!placeholder) {
-        placeholder = document.createElement('div');
-        placeholder.className = 'image-placeholder';
-        container.appendChild(placeholder);
-    }
-
-    placeholder.textContent =
-        'Image unavailable for ' + (img.dataset.name || img.alt);
-    placeholder.style.display = 'flex';
-}
-
-async function findOnlineCarImage(img) {
-    const brand = (img.dataset.brand || '').trim();
-    const model = (img.dataset.model || img.dataset.name || '').trim();
-    const container = img.closest('.car-image');
-    const placeholder = container?.querySelector('.image-placeholder');
-
-    if (!model) {
-        showPlaceholder(img);
-        return;
-    }
-
-    const normalize = value => value.toLowerCase()
-        .replace(/[^a-z0-9]+/g, ' ').trim();
-
-    // Keep short model identifiers such as A4, ES, i20 and E-Class.
-    // These were previously discarded, causing valid searches to fail.
-    const normalize = value => value.toLowerCase()
-        .replace(/[^a-z0-9]+/g, ' ').trim();
-
-    const normalizedModel = normalize(model);
-    const normalizedBrand = normalize(brand);
-    const modelWords = normalizedModel.split(' ').filter(Boolean);
-    const brandWords = normalizedBrand.split(' ').filter(Boolean);
-
-    if (!normalizedModel) {
-        showPlaceholder(img);
-        return;
-    }
-
-    const queries = [
-        `${brand} ${model} automobile`,
-        `${brand} ${model} vehicle`
-    ];
-
-    try {
-        let pages = [];
-
-        for (const query of queries) {
-            const params = new URLSearchParams({
-                action: 'query',
-                generator: 'search',
-                gsrsearch: query,
-                gsrnamespace: '6',
-                gsrlimit: '20',
-                prop: 'imageinfo',
-                iiprop: 'url|mime',
-                iiurlwidth: '900',
-                format: 'json',
-                origin: '*'
-            });
-
-            const response = await fetch(
-                'https://commons.wikimedia.org/w/api.php?' + params.toString()
-            );
-            if (!response.ok) continue;
-
-            const data = await response.json();
-            pages = Object.values(data.query?.pages || {});
-            if (pages.length) break;
-        }
-
-        const candidates = pages.map(page => {
-            const info = page.imageinfo?.[0];
-            if (!info?.thumburl) return null;
-
-            const title = normalize((page.title || '').replace(/^File:/i, ''));
-            const mime = (info.mime || '').toLowerCase();
-            if (!mime.startsWith('image/') || mime === 'image/svg+xml') return null;
-
-            const modelMatches = modelWords.filter(word => title.split(' ').includes(word)).length;
-            const brandMatches = brandWords.filter(word => title.split(' ').includes(word)).length;
-
-            // Match the full model phrase when possible. For model names with
-            // multiple words, require all model tokens in the filename.
-            // Short identifiers (A4, ES, i20) are allowed but require a brand
-            // match too, reducing the chance of selecting an unrelated image.
-            const exactModelPhrase = title.includes(normalizedModel);
-            const allModelTokens = modelMatches === modelWords.length;
-            const shortModelNeedsBrand = modelWords.some(word => word.length <= 2);
-            if (!(exactModelPhrase || allModelTokens)) return null;
-            if (shortModelNeedsBrand && brandWords.length && brandMatches === 0) return null;
-
-            return {
-                url: info.thumburl,
-                title: page.title,
-                score: (exactModelPhrase ? 100 : modelMatches * 10) + brandMatches
-            };
-        }).filter(Boolean).sort((a, b) => b.score - a.score);
-
-        const best = candidates[0];
-
-        // If the filename doesn't clearly identify the model, don't show a
-        // potentially unrelated vehicle.
-        if (!best) {
-            showPlaceholder(img);
-            return;
-        }
-
-        img.onload = () => {
-            if (placeholder) placeholder.style.display = 'none';
-            img.style.display = 'block';
-        };
-        img.onerror = () => showPlaceholder(img);
-        img.src = best.url;
-
-        console.info('CarHub image source:', best.title);
-    } catch (error) {
-        console.error('Image lookup failed for ' + model, error);
-        showPlaceholder(img);
-    }
-}
-
-document.addEventListener('DOMContentLoaded', () => {
-    document.querySelectorAll('.online-car-image').forEach(img => {
-        findOnlineCarImage(img);
-    });
-});
-</script>
 
 </body>
 </html>
 ```
-
