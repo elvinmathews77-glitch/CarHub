@@ -14,14 +14,14 @@ if (!$car_id || $car_id < 1) {
     exit('Invalid car ID. <a href="cars.php">Back to Cars</a>');
 }
 
-// Verify database connection
+// Check database connection
 if (!isset($conn) || !($conn instanceof mysqli)) {
-    error_log('CarHub: Database connection unavailable.');
+    error_log('CarHub: Database connection is unavailable.');
     http_response_code(500);
     exit('Unable to connect to the database.');
 }
 
-// Fetch vehicle details
+// Fetch car details
 $stmt = $conn->prepare('SELECT * FROM cars WHERE id = ?');
 
 if (!$stmt) {
@@ -33,7 +33,7 @@ if (!$stmt) {
 $stmt->bind_param('i', $car_id);
 
 if (!$stmt->execute()) {
-    error_log('CarHub execute error: ' . $stmt->error);
+    error_log('CarHub execution error: ' . $stmt->error);
     $stmt->close();
     http_response_code(500);
     exit('Unable to load vehicle details.');
@@ -48,7 +48,7 @@ if (!$car) {
     exit('Vehicle not found. <a href="cars.php">Back to Cars</a>');
 }
 
-// Vehicle details
+// Vehicle information
 $brand = $car['brand'] ?? '';
 $model = $car['model'] ?? ($car['name'] ?? 'Vehicle');
 $price = (float) ($car['price'] ?? 0);
@@ -66,7 +66,7 @@ if ($displayName === '') {
     $displayName = $car['name'] ?? 'Vehicle';
 }
 
-// Escape HTML
+// Escape HTML output
 function h($value)
 {
     return htmlspecialchars(
@@ -76,19 +76,24 @@ function h($value)
     );
 }
 
-// Format amounts using Indian numbering: 10,00,000
+/*
+ * Indian number formatting:
+ * 100000  => 1,00,000
+ * 1000000 => 10,00,000
+ * 10000000 => 1,00,00,000
+ */
 function number_format_indian($amount)
 {
     $amount = (int) round((float) $amount);
     $negative = $amount < 0;
-    $amount = (string) abs($amount);
+    $digits = (string) abs($amount);
 
-    if (strlen($amount) <= 3) {
-        return ($negative ? '-' : '') . $amount;
+    if (strlen($digits) <= 3) {
+        return ($negative ? '-' : '') . $digits;
     }
 
-    $lastThree = substr($amount, -3);
-    $remaining = substr($amount, 0, -3);
+    $lastThree = substr($digits, -3);
+    $remaining = substr($digits, 0, -3);
 
     $remaining = preg_replace(
         '/\B(?=(\d{2})+(?!\d))/',
@@ -100,7 +105,7 @@ function number_format_indian($amount)
         . $remaining . ',' . $lastThree;
 }
 
-// Match vehicles to existing image filenames
+// Map car names to existing image filenames
 $searchName = strtolower(trim($brand . ' ' . $model));
 
 $imageMap = [
@@ -123,7 +128,6 @@ $imageMap = [
 
 $imageFile = null;
 
-// Prefer exact image match
 if (isset($imageMap[$searchName])) {
     $imageFile = $imageMap[$searchName];
 } else {
@@ -135,7 +139,7 @@ if (isset($imageMap[$searchName])) {
     }
 }
 
-// Check whether the image exists
+// Verify image exists
 $imageAvailable = false;
 $imageUrl = '';
 
@@ -147,6 +151,9 @@ if ($imageFile !== null) {
         $imageUrl = 'images/cars/' . rawurlencode($imageFile);
     }
 }
+
+// Precalculate formatted price
+$formattedPrice = number_format_indian($price);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -496,9 +503,9 @@ if ($imageFile !== null) {
 
             <h1><?= h($model) ?></h1>
 
-            <!-- Correct Indian price formatting -->
+            <!-- Indian numbering format -->
             <div class="price">
-                ₹<?= h(number_format_indian($price)) ?>
+                ₹<?= h($formattedPrice) ?>
             </div>
 
             <div class="specifications">
