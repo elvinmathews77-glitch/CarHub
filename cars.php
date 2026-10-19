@@ -1,3 +1,4 @@
+
 <?php
 require_once __DIR__ . '/config/db.php';
 
@@ -6,12 +7,17 @@ require_once __DIR__ . '/config/db.php';
 | CarHub Cars Listing
 |--------------------------------------------------------------------------
 | Image directory: images/cars/
-| Images currently use .avif extensions.
+| Images use .avif extensions.
+|--------------------------------------------------------------------------
 */
 
 function e($value)
 {
-    return htmlspecialchars((string)($value ?? ''), ENT_QUOTES, 'UTF-8');
+    return htmlspecialchars(
+        (string) ($value ?? ''),
+        ENT_QUOTES,
+        'UTF-8'
+    );
 }
 
 function getCarValue($car, $fields, $default = '')
@@ -27,15 +33,52 @@ function getCarValue($car, $fields, $default = '')
 
 /*
 |--------------------------------------------------------------------------
+| Format prices using Indian numbering
+|--------------------------------------------------------------------------
+| 100000      = 1,00,000
+| 1000000     = 10,00,000
+| 10000000    = 1,00,00,000
+|--------------------------------------------------------------------------
+*/
+
+function formatIndianPrice($price)
+{
+    if ($price === '' || !is_numeric($price)) {
+        return 'Price on request';
+    }
+
+    $amount = (int) round((float) $price);
+    $negative = $amount < 0;
+    $digits = (string) abs($amount);
+
+    if (strlen($digits) <= 3) {
+        return ($negative ? '-' : '') . $digits;
+    }
+
+    $lastThree = substr($digits, -3);
+    $remaining = substr($digits, 0, -3);
+
+    $remaining = preg_replace(
+        '/\B(?=(\d{2})+(?!\d))/',
+        ',',
+        $remaining
+    );
+
+    return ($negative ? '-' : '')
+        . $remaining . ',' . $lastThree;
+}
+
+/*
+|--------------------------------------------------------------------------
 | Match each vehicle to an existing image
 |--------------------------------------------------------------------------
 */
 
 function getCarImage($car)
 {
-    $brand = strtolower((string)($car['brand'] ?? ''));
-    $model = strtolower((string)($car['model'] ?? ''));
-    $name  = strtolower((string)($car['name'] ?? ''));
+    $brand = strtolower((string) ($car['brand'] ?? ''));
+    $model = strtolower((string) ($car['model'] ?? ''));
+    $name  = strtolower((string) ($car['name'] ?? ''));
 
     $search = $brand . ' ' . $model . ' ' . $name;
 
@@ -44,24 +87,33 @@ function getCarImage($car)
         'audi'     => 'audi-a4.avif',
         'swift'    => 'maruti-swift.jpg.avif',
         'i20'      => 'hyundai-i20.jpg.avif',
-        'lexus'    => 'lexus-es.jpg.avif',
+        'lexus'    => 'lexus-es.avif',
         'velar'    => 'range-rover-velar.jpg.avif',
-        'fortuner' => '- toyota-fortuner.jpg.avif',
+        'fortuner' => 'toyota-fortuner.jpg.avif',
         'gle'      => 'mercedes-gle.jpg.avif',
         'c-class'  => 'mercedes-c-class.jpg.avif',
         'e-class'  => 'mercedes-e-class.jpg.avif'
     ];
 
-    // Use specific model matches before general brand matches.
+    // Check specific model names before general brand names.
     $keywords = [
-        'fortuner', 'velar', 'c-class', 'e-class',
-        'gle', 'swift', 'i20', 'lexus', 'audi', 'bmw'
+        'fortuner',
+        'velar',
+        'c-class',
+        'e-class',
+        'gle',
+        'swift',
+        'i20',
+        'lexus',
+        'audi',
+        'bmw'
     ];
 
     foreach ($keywords as $keyword) {
-        if (strpos($search, $keyword) !== false &&
-            isset($imageMap[$keyword])) {
-
+        if (
+            strpos($search, $keyword) !== false &&
+            isset($imageMap[$keyword])
+        ) {
             $filename = $imageMap[$keyword];
             $fullPath = __DIR__ . '/images/cars/' . $filename;
 
@@ -84,18 +136,25 @@ $cars = [];
 $errorMessage = '';
 
 try {
-    $result = $conn->query("SELECT * FROM cars ORDER BY id ASC LIMIT 10");
-
-    if ($result) {
-        while ($row = $result->fetch_assoc()) {
-            $cars[] = $row;
-        }
-
-        $result->free();
+    if (!isset($conn) || !($conn instanceof mysqli)) {
+        throw new RuntimeException('Database connection unavailable.');
     }
+
+    $result = $conn->query(
+        "SELECT * FROM cars ORDER BY id ASC LIMIT 10"
+    );
+
+    while ($row = $result->fetch_assoc()) {
+        $cars[] = $row;
+    }
+
+    $result->free();
+
 } catch (Throwable $error) {
     error_log('CarHub listing error: ' . $error->getMessage());
-    $errorMessage = 'Unable to load cars right now. Please try again later.';
+
+    $errorMessage =
+        'Unable to load cars right now. Please try again later.';
 }
 ?>
 <!DOCTYPE html>
@@ -269,6 +328,7 @@ try {
             font-size: 23px;
             font-weight: 800;
             margin: 10px 0 15px;
+            overflow-wrap: anywhere;
         }
 
         .car-specs {
@@ -374,6 +434,7 @@ try {
 
 <section class="hero">
     <h1>Find Your Perfect Car</h1>
+
     <p>
         Explore our collection of vehicles, compare their features,
         and choose a car that suits your needs.
@@ -384,8 +445,9 @@ try {
 
     <div class="section-heading">
         <h2>Available Cars</h2>
+
         <span class="car-count">
-            <?php echo count($cars); ?> cars displayed
+            <?= count($cars) ?> cars displayed
         </span>
     </div>
 
@@ -394,7 +456,7 @@ try {
         <?php if ($errorMessage !== ''): ?>
 
             <div class="error-state">
-                <?php echo e($errorMessage); ?>
+                <?= e($errorMessage) ?>
             </div>
 
         <?php elseif (empty($cars)): ?>
@@ -410,14 +472,34 @@ try {
 
                 <?php
                 $id = (int) getCarValue($car, ['id'], 0);
+
                 $brand = getCarValue($car, ['brand'], '');
-                $model = getCarValue($car, ['model', 'name'], 'Car');
+
+                $model = getCarValue(
+                    $car,
+                    ['model', 'name'],
+                    'Car'
+                );
+
                 $year = getCarValue($car, ['year'], '');
                 $price = getCarValue($car, ['price'], '');
-                $fuel = getCarValue($car, ['fuel', 'fuel_type'], '');
-                $transmission = getCarValue($car, ['transmission'], '');
+
+                $fuel = getCarValue(
+                    $car,
+                    ['fuel', 'fuel_type'],
+                    ''
+                );
+
+                $transmission = getCarValue(
+                    $car,
+                    ['transmission'],
+                    ''
+                );
+
                 $mileage = getCarValue($car, ['mileage'], '');
+
                 $image = getCarImage($car);
+
                 $displayName = trim($brand . ' ' . $model);
                 ?>
 
@@ -428,8 +510,8 @@ try {
                         <?php if ($image !== ''): ?>
 
                             <img
-                                src="<?php echo e($image); ?>"
-                                alt="<?php echo e($displayName); ?>"
+                                src="<?= e($image) ?>"
+                                alt="<?= e($displayName) ?>"
                                 loading="lazy"
                                 onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"
                             >
@@ -454,36 +536,40 @@ try {
                     <div class="car-content">
 
                         <h3 class="car-title">
-                            <?php echo e($displayName); ?>
+                            <?= e($displayName) ?>
                         </h3>
 
                         <?php if ($year !== ''): ?>
                             <p class="car-brand">
-                                Model year: <?php echo e($year); ?>
+                                Model year: <?= e($year) ?>
                             </p>
                         <?php endif; ?>
 
                         <div class="car-price">
-                            <?php
-                            echo ($price !== '' && is_numeric($price))
-                                ? '₹' . number_format((float)$price)
-                                : 'Price on request';
-                            ?>
+                            <?php if ($price !== '' && is_numeric($price)): ?>
+                                ₹<?= e(formatIndianPrice($price)) ?>
+                            <?php else: ?>
+                                Price on request
+                            <?php endif; ?>
                         </div>
 
                         <div class="car-specs">
 
                             <?php if ($fuel !== ''): ?>
-                                <span class="spec"><?php echo e($fuel); ?></span>
+                                <span class="spec">
+                                    <?= e($fuel) ?>
+                                </span>
                             <?php endif; ?>
 
                             <?php if ($transmission !== ''): ?>
-                                <span class="spec"><?php echo e($transmission); ?></span>
+                                <span class="spec">
+                                    <?= e($transmission) ?>
+                                </span>
                             <?php endif; ?>
 
                             <?php if ($mileage !== ''): ?>
                                 <span class="spec">
-                                    <?php echo e($mileage); ?> km/l
+                                    <?= e($mileage) ?> km/l
                                 </span>
                             <?php endif; ?>
 
@@ -491,12 +577,13 @@ try {
 
                         <a
                             class="details-btn"
-                            href="car-details.php?id=<?php echo $id; ?>"
+                            href="car-details.php?id=<?= $id ?>"
                         >
                             View Details
                         </a>
 
                     </div>
+
                 </article>
 
             <?php endforeach; ?>
@@ -507,9 +594,10 @@ try {
 </main>
 
 <footer>
-    <p>&copy; <?php echo date('Y'); ?> CarHub. All rights reserved.</p>
+    <p>
+        &copy; <?= date('Y') ?> CarHub. All rights reserved.
+    </p>
 </footer>
 
 </body>
 </html>
-```
