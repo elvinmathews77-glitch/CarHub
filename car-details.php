@@ -1,3 +1,4 @@
+
 <?php
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
@@ -5,7 +6,7 @@ if (session_status() === PHP_SESSION_NONE) {
 
 require_once __DIR__ . '/config/db.php';
 
-// Validate the car ID
+// Validate car ID
 $car_id = filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT);
 
 if (!$car_id || $car_id < 1) {
@@ -13,9 +14,9 @@ if (!$car_id || $car_id < 1) {
     exit('Invalid car ID. <a href="cars.php">Back to Cars</a>');
 }
 
-// Check database connection
+// Verify database connection
 if (!isset($conn) || !($conn instanceof mysqli)) {
-    error_log('CarHub: Database connection $conn is unavailable.');
+    error_log('CarHub: Database connection unavailable.');
     http_response_code(500);
     exit('Unable to connect to the database.');
 }
@@ -30,11 +31,16 @@ if (!$stmt) {
 }
 
 $stmt->bind_param('i', $car_id);
-$stmt->execute();
+
+if (!$stmt->execute()) {
+    error_log('CarHub execute error: ' . $stmt->error);
+    $stmt->close();
+    http_response_code(500);
+    exit('Unable to load vehicle details.');
+}
 
 $result = $stmt->get_result();
 $car = $result->fetch_assoc();
-
 $stmt->close();
 
 if (!$car) {
@@ -50,21 +56,51 @@ $year = $car['year'] ?? 'N/A';
 $fuel = $car['fuel'] ?? ($car['fuel_type'] ?? 'N/A');
 $transmission = $car['transmission'] ?? 'N/A';
 $mileage = $car['mileage'] ?? 'N/A';
-$description = $car['description'] ??
-    'Contact CarHub for more information about this vehicle.';
+
+$description = $car['description']
+    ?? 'Contact CarHub for more information about this vehicle.';
 
 $displayName = trim($brand . ' ' . $model);
 
 if ($displayName === '') {
-    $displayName = 'Vehicle';
+    $displayName = $car['name'] ?? 'Vehicle';
 }
 
-// Escape HTML output
-function h($value) {
-    return htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8');
+// Escape HTML
+function h($value)
+{
+    return htmlspecialchars(
+        (string) $value,
+        ENT_QUOTES,
+        'UTF-8'
+    );
 }
 
-// Match vehicles to the existing image filenames
+// Format amounts using Indian numbering: 10,00,000
+function number_format_indian($amount)
+{
+    $amount = (int) round((float) $amount);
+    $negative = $amount < 0;
+    $amount = (string) abs($amount);
+
+    if (strlen($amount) <= 3) {
+        return ($negative ? '-' : '') . $amount;
+    }
+
+    $lastThree = substr($amount, -3);
+    $remaining = substr($amount, 0, -3);
+
+    $remaining = preg_replace(
+        '/\B(?=(\d{2})+(?!\d))/',
+        ',',
+        $remaining
+    );
+
+    return ($negative ? '-' : '')
+        . $remaining . ',' . $lastThree;
+}
+
+// Match vehicles to existing image filenames
 $searchName = strtolower(trim($brand . ' ' . $model));
 
 $imageMap = [
@@ -82,16 +118,15 @@ $imageMap = [
     'mercedes-benz gle' => 'mercedes-gle.jpg.avif',
     'range rover velar' => 'range-rover-velar.jpg.avif',
     'land rover range rover velar' => 'range-rover-velar.jpg.avif',
-    'toyota fortuner' => '- toyota-fortuner.jpg.avif'
+    'toyota fortuner' => 'toyota-fortuner.jpg.avif'
 ];
 
 $imageFile = null;
 
-// Prefer an exact match
+// Prefer exact image match
 if (isset($imageMap[$searchName])) {
     $imageFile = $imageMap[$searchName];
 } else {
-    // Handle common variations in brand/model names
     foreach ($imageMap as $vehicle => $filename) {
         if (strpos($searchName, $vehicle) !== false) {
             $imageFile = $filename;
@@ -100,7 +135,7 @@ if (isset($imageMap[$searchName])) {
     }
 }
 
-// Only use image files that actually exist
+// Check whether the image exists
 $imageAvailable = false;
 $imageUrl = '';
 
@@ -191,7 +226,6 @@ if ($imageFile !== null) {
             box-shadow: 0 10px 35px rgba(0, 0, 0, 0.08);
         }
 
-        /* Wide image area */
         .car-image {
             width: 100%;
             height: 500px;
@@ -202,7 +236,6 @@ if ($imageFile !== null) {
             overflow: hidden;
         }
 
-        /* Fill the area and crop excess portrait image */
         .car-image img {
             display: block;
             width: 100%;
@@ -217,7 +250,7 @@ if ($imageFile !== null) {
             font-size: 16px;
         }
 
-        .image-fallback .car-icon {
+        .car-icon {
             display: block;
             font-size: 55px;
             margin-bottom: 12px;
@@ -463,8 +496,9 @@ if ($imageFile !== null) {
 
             <h1><?= h($model) ?></h1>
 
+            <!-- Correct Indian price formatting -->
             <div class="price">
-                ₹<?= h(number_format($price, 0, '.', ',')) ?>
+                ₹<?= h(number_format_indian($price)) ?>
             </div>
 
             <div class="specifications">
@@ -558,8 +592,8 @@ if ($imageFile !== null) {
                 </div>
 
                 <p class="emi-note">
-                    This is an estimate only. Actual EMI, interest, fees, and
-                    loan eligibility depend on the lender.
+                    This is an estimate only. Actual EMI, interest, fees,
+                    and loan eligibility depend on the lender.
                 </p>
             </section>
 
@@ -627,6 +661,7 @@ if ($imageFile !== null) {
         const totalInterest = totalPayment - principal;
 
         emiAmount.textContent = formatRupees(emi);
+
         loanSummary.textContent =
             'Loan amount: ' + formatRupees(principal) +
             ' | Total interest: ' + formatRupees(totalInterest);
@@ -642,4 +677,3 @@ if ($imageFile !== null) {
 
 </body>
 </html>
-```
