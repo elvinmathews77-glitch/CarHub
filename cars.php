@@ -419,15 +419,17 @@ async function findOnlineCarImage(img) {
     const normalize = value => value.toLowerCase()
         .replace(/[^a-z0-9]+/g, ' ').trim();
 
-    // Use model words as the main check. Short words like "ES" are too
-    // ambiguous, so they are not accepted as a model match by themselves.
-    const ignored = new Set(['car', 'cars', 'the', 'series', 'class', 'model']);
-    const modelWords = normalize(model).split(' ')
-        .filter(word => word.length >= 3 && !ignored.has(word));
-    const brandWords = normalize(brand).split(' ')
-        .filter(word => word.length >= 3);
+    // Keep short model identifiers such as A4, ES, i20 and E-Class.
+    // These were previously discarded, causing valid searches to fail.
+    const normalize = value => value.toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ').trim();
 
-    if (modelWords.length === 0) {
+    const normalizedModel = normalize(model);
+    const normalizedBrand = normalize(brand);
+    const modelWords = normalizedModel.split(' ').filter(Boolean);
+    const brandWords = normalizedBrand.split(' ').filter(Boolean);
+
+    if (!normalizedModel) {
         showPlaceholder(img);
         return;
     }
@@ -472,18 +474,23 @@ async function findOnlineCarImage(img) {
             const mime = (info.mime || '').toLowerCase();
             if (!mime.startsWith('image/') || mime === 'image/svg+xml') return null;
 
-            const modelMatches = modelWords.filter(word => title.includes(word)).length;
-            const brandMatches = brandWords.filter(word => title.includes(word)).length;
+            const modelMatches = modelWords.filter(word => title.split(' ').includes(word)).length;
+            const brandMatches = brandWords.filter(word => title.split(' ').includes(word)).length;
 
-            // Require every meaningful model word in the image filename.
-            // Brand words add confidence, but are not mandatory because some
-            // legitimate Commons filenames use only the model name.
-            if (modelMatches !== modelWords.length) return null;
+            // Match the full model phrase when possible. For model names with
+            // multiple words, require all model tokens in the filename.
+            // Short identifiers (A4, ES, i20) are allowed but require a brand
+            // match too, reducing the chance of selecting an unrelated image.
+            const exactModelPhrase = title.includes(normalizedModel);
+            const allModelTokens = modelMatches === modelWords.length;
+            const shortModelNeedsBrand = modelWords.some(word => word.length <= 2);
+            if (!(exactModelPhrase || allModelTokens)) return null;
+            if (shortModelNeedsBrand && brandWords.length && brandMatches === 0) return null;
 
             return {
                 url: info.thumburl,
                 title: page.title,
-                score: modelMatches * 10 + brandMatches
+                score: (exactModelPhrase ? 100 : modelMatches * 10) + brandMatches
             };
         }).filter(Boolean).sort((a, b) => b.score - a.score);
 
