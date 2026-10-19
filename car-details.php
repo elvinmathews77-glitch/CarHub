@@ -1,29 +1,38 @@
 ```php
 <?php
+// IMPORTANT: Nothing should appear before this opening PHP tag.
+
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
 require_once __DIR__ . '/config/db.php';
 
-// Get car ID from URL
+// Validate the car ID
 $car_id = filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT);
 
 if (!$car_id || $car_id < 1) {
     http_response_code(400);
-    exit('Invalid car ID. Please return to the cars page.');
+    exit('Invalid car ID. <a href="cars.php">Back to Cars</a>');
 }
 
-// Fetch car details
-$stmt = $conn->prepare("SELECT * FROM cars WHERE id = ?");
+// Check database connection
+if (!isset($conn) || !($conn instanceof mysqli)) {
+    error_log('CarHub: Database connection $conn is unavailable.');
+    http_response_code(500);
+    exit('Unable to connect to the database.');
+}
+
+// Fetch vehicle details
+$stmt = $conn->prepare('SELECT * FROM cars WHERE id = ?');
 
 if (!$stmt) {
-    error_log("CarHub database error: " . $conn->error);
+    error_log('CarHub query error: ' . $conn->error);
     http_response_code(500);
-    exit('Unable to load car details right now.');
+    exit('Unable to load vehicle details.');
 }
 
-$stmt->bind_param("i", $car_id);
+$stmt->bind_param('i', $car_id);
 $stmt->execute();
 
 $result = $stmt->get_result();
@@ -36,26 +45,30 @@ if (!$car) {
     exit('Vehicle not found. <a href="cars.php">Back to Cars</a>');
 }
 
-// Safely read vehicle information
+// Vehicle details
 $brand = $car['brand'] ?? '';
 $model = $car['model'] ?? ($car['name'] ?? 'Vehicle');
-$name = trim($brand . ' ' . $model);
-
-if ($name === '') {
-    $name = 'Vehicle';
-}
-
 $price = (float) ($car['price'] ?? 0);
 $year = $car['year'] ?? 'N/A';
 $fuel = $car['fuel'] ?? ($car['fuel_type'] ?? 'N/A');
 $transmission = $car['transmission'] ?? 'N/A';
 $mileage = $car['mileage'] ?? 'N/A';
-$description = $car['description'] ?? 'Contact us for more information about this vehicle.';
+$description = $car['description'] ??
+    'Contact CarHub for more information about this vehicle.';
 
-$formatPrice = number_format($price, 0, '.', ',');
+$displayName = trim($brand . ' ' . $model);
 
-// Match database vehicle names to the exact image filenames
-$searchName = strtolower($brand . ' ' . $model);
+if ($displayName === '') {
+    $displayName = 'Vehicle';
+}
+
+// Escape HTML output
+function h($value) {
+    return htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8');
+}
+
+// Match vehicles to the existing image filenames
+$searchName = strtolower(trim($brand . ' ' . $model));
 
 $imageMap = [
     'bmw 3 series' => 'bmw-3-series.jpg.avif',
@@ -63,7 +76,7 @@ $imageMap = [
     'maruti swift' => 'maruti-swift.jpg.avif',
     'maruti suzuki swift' => 'maruti-swift.jpg.avif',
     'hyundai i20' => 'hyundai-i20.jpg.avif',
-    'lexus es' => 'lexus-es.jpg.avif',
+    'lexus es' => 'lexus-es.avif',
     'mercedes c-class' => 'mercedes-c-class.jpg.avif',
     'mercedes-benz c-class' => 'mercedes-c-class.jpg.avif',
     'mercedes e-class' => 'mercedes-e-class.jpg.avif',
@@ -77,35 +90,30 @@ $imageMap = [
 
 $imageFile = null;
 
-// Match the full brand and model first
-foreach ($imageMap as $vehicle => $filename) {
-    if ($searchName === $vehicle) {
-        $imageFile = $filename;
-        break;
-    }
-}
-
-// Try a partial match for variations in database naming
-if ($imageFile === null) {
+// Prefer an exact match
+if (isset($imageMap[$searchName])) {
+    $imageFile = $imageMap[$searchName];
+} else {
+    // Handle common variations in brand/model names
     foreach ($imageMap as $vehicle => $filename) {
-        if (strpos($searchName, $vehicle) !== false ||
-            strpos($vehicle, $searchName) !== false) {
+        if (strpos($searchName, $vehicle) !== false) {
             $imageFile = $filename;
             break;
         }
     }
 }
 
-$imagePath = $imageFile
-    ? 'images/cars/' . rawurlencode($imageFile)
-    : null;
+// Only use image files that actually exist
+$imageAvailable = false;
+$imageUrl = '';
 
-$imageAvailable = $imageFile !== null
-    && is_file(__DIR__ . '/images/cars/' . $imageFile);
+if ($imageFile !== null) {
+    $localImagePath = __DIR__ . '/images/cars/' . $imageFile;
 
-// Escape text before displaying it in HTML
-function h($value) {
-    return htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8');
+    if (is_file($localImagePath)) {
+        $imageAvailable = true;
+        $imageUrl = 'images/cars/' . rawurlencode($imageFile);
+    }
 }
 ?>
 <!DOCTYPE html>
@@ -113,7 +121,8 @@ function h($value) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?= h($name) ?> | CarHub</title>
+
+    <title><?= h($displayName) ?> | CarHub</title>
 
     <style>
         * {
@@ -123,8 +132,8 @@ function h($value) {
         body {
             margin: 0;
             font-family: Arial, Helvetica, sans-serif;
-            background: #f4f5f8;
             color: #1e293b;
+            background: #f4f5f8;
         }
 
         header {
@@ -134,15 +143,15 @@ function h($value) {
             display: flex;
             align-items: center;
             justify-content: space-between;
+            gap: 20px;
             flex-wrap: wrap;
-            gap: 15px;
         }
 
         .logo {
+            color: white;
+            text-decoration: none;
             font-size: 30px;
             font-weight: bold;
-            text-decoration: none;
-            color: white;
         }
 
         .logo span {
@@ -158,7 +167,6 @@ function h($value) {
         nav a {
             color: white;
             text-decoration: none;
-            font-size: 15px;
         }
 
         nav a:hover {
@@ -166,7 +174,7 @@ function h($value) {
         }
 
         .container {
-            max-width: 1300px;
+            max-width: 1350px;
             margin: 35px auto;
             padding: 0 20px;
         }
@@ -175,8 +183,8 @@ function h($value) {
             display: inline-block;
             margin-bottom: 22px;
             color: #111827;
-            font-weight: bold;
             text-decoration: none;
+            font-weight: bold;
         }
 
         .car-card {
@@ -186,75 +194,78 @@ function h($value) {
             box-shadow: 0 10px 35px rgba(0, 0, 0, 0.08);
         }
 
+        /* Wide image area */
         .car-image {
             width: 100%;
             height: 500px;
             background: #e7eaf0;
             display: flex;
-            justify-content: center;
             align-items: center;
+            justify-content: center;
             overflow: hidden;
         }
 
+        /* Fill the area and crop excess portrait image */
         .car-image img {
             display: block;
             width: 100%;
             height: 100%;
-            object-fit: contain;
+            object-fit: cover;
+            object-position: center;
         }
 
         .image-fallback {
-            color: #64748b;
             text-align: center;
+            color: #64748b;
             font-size: 16px;
         }
 
         .image-fallback .car-icon {
-            font-size: 55px;
             display: block;
+            font-size: 55px;
             margin-bottom: 12px;
         }
 
         .car-content {
-            padding: 35px 40px;
+            padding: 35px 42px;
         }
 
         .brand {
             color: #ef3340;
-            font-weight: bold;
             text-transform: uppercase;
+            font-weight: bold;
             margin-bottom: 8px;
         }
 
         h1 {
             font-size: 42px;
-            margin: 0 0 12px;
+            margin: 0 0 15px;
         }
 
         .price {
             color: #ef3340;
             font-size: 28px;
             font-weight: bold;
-            margin: 15px 0 25px;
+            margin: 18px 0 25px;
         }
 
         .specifications {
             display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
+            grid-template-columns: repeat(4, minmax(0, 1fr));
             gap: 15px;
             margin: 25px 0;
         }
 
         .spec {
-            background: #f5f6f8;
             padding: 18px;
+            background: #f5f6f8;
             border-radius: 10px;
         }
 
         .spec-label {
             display: block;
-            color: #64748b;
             font-size: 13px;
+            color: #64748b;
             margin-bottom: 8px;
         }
 
@@ -264,28 +275,28 @@ function h($value) {
         }
 
         .description {
-            line-height: 1.7;
             color: #475569;
+            line-height: 1.7;
             white-space: pre-line;
         }
 
         .actions {
             display: flex;
-            flex-wrap: wrap;
             gap: 12px;
+            flex-wrap: wrap;
             margin: 25px 0 35px;
         }
 
         .button {
             display: inline-block;
             padding: 14px 22px;
+            border: 0;
             border-radius: 8px;
             text-decoration: none;
-            font-weight: bold;
             text-align: center;
-            border: none;
-            cursor: pointer;
             font-size: 15px;
+            font-weight: bold;
+            cursor: pointer;
         }
 
         .button-primary {
@@ -299,10 +310,10 @@ function h($value) {
         }
 
         .emi-section {
-            margin-top: 25px;
-            padding: 28px;
             background: #f5f6f8;
+            padding: 28px;
             border-radius: 12px;
+            margin-top: 25px;
         }
 
         .emi-section h2 {
@@ -317,8 +328,8 @@ function h($value) {
 
         .form-group label {
             display: block;
-            font-weight: bold;
             font-size: 14px;
+            font-weight: bold;
             margin-bottom: 8px;
         }
 
@@ -333,10 +344,10 @@ function h($value) {
         }
 
         .emi-result {
-            margin-top: 22px;
-            padding: 18px;
-            border-radius: 9px;
             background: white;
+            border-radius: 9px;
+            padding: 18px;
+            margin-top: 22px;
         }
 
         .emi-result strong {
@@ -345,20 +356,30 @@ function h($value) {
         }
 
         .emi-note {
-            color: #64748b;
             font-size: 13px;
-            line-height: 1.5;
+            line-height: 1.6;
+            color: #64748b;
         }
 
         footer {
+            margin-top: 45px;
+            padding: 22px;
             background: #111;
             color: white;
             text-align: center;
-            padding: 22px;
-            margin-top: 45px;
         }
 
-        @media (max-width: 700px) {
+        @media (max-width: 850px) {
+            .specifications {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            .car-image {
+                height: 380px;
+            }
+        }
+
+        @media (max-width: 600px) {
             header {
                 padding: 18px 5%;
             }
@@ -423,8 +444,8 @@ function h($value) {
         <div class="car-image">
             <?php if ($imageAvailable): ?>
                 <img
-                    src="<?= h($imagePath) ?>"
-                    alt="<?= h($name) ?>"
+                    src="<?= h($imageUrl) ?>"
+                    alt="<?= h($displayName) ?>"
                     onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"
                 >
                 <div class="image-fallback" style="display:none;">
@@ -446,7 +467,7 @@ function h($value) {
             <h1><?= h($model) ?></h1>
 
             <div class="price">
-                ₹<?= h($formatPrice) ?>
+                ₹<?= h(number_format($price, 0, '.', ',')) ?>
             </div>
 
             <div class="specifications">
@@ -480,16 +501,12 @@ function h($value) {
                 <a
                     class="button button-primary"
                     href="booking.php?car_id=<?= (int) $car['id'] ?>"
-                >
-                    Book This Car
-                </a>
+                >Book This Car</a>
 
                 <a
                     class="button button-secondary"
                     href="test-drive.php?car_id=<?= (int) $car['id'] ?>"
-                >
-                    Book a Test Drive
-                </a>
+                >Book a Test Drive</a>
             </div>
 
             <section class="emi-section">
@@ -544,14 +561,13 @@ function h($value) {
                 </div>
 
                 <p class="emi-note">
-                    This is an estimate for planning purposes. Actual EMI,
-                    interest, fees, and loan eligibility depend on the lender.
+                    This is an estimate only. Actual EMI, interest, fees, and
+                    loan eligibility depend on the lender.
                 </p>
             </section>
 
         </div>
     </section>
-
 </main>
 
 <footer>
@@ -561,14 +577,16 @@ function h($value) {
 <script>
 (function () {
     const price = <?= json_encode($price) ?>;
+
     const downPaymentInput = document.getElementById('downPayment');
     const interestInput = document.getElementById('interestRate');
     const yearsInput = document.getElementById('loanYears');
     const emiAmount = document.getElementById('emiAmount');
     const loanSummary = document.getElementById('loanSummary');
 
-    const formatRupees = amount =>
-        '₹' + Math.round(amount).toLocaleString('en-IN');
+    function formatRupees(amount) {
+        return '₹' + Math.round(amount).toLocaleString('en-IN');
+    }
 
     function calculateEMI() {
         const downPayment = Number(downPaymentInput.value);
